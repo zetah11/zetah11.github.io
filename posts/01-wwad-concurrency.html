@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>WWAD 1: Concurrency</title>
+
+    <link rel=stylesheet href="../style.css">
+    <script src="custom-elements.js"></script>
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>WWAD 1: Concurrency</h1>
+        
+        <p>
+          <time>2022 JUNE 02</time>
+          <span>LANG, WWAD</span>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <p>
+        Sometimes in a program, we'd like to do several things simultaneously,
+        and often we call it
+        concurrency<sup><a href="#note-1" id="ref-1a">1</a></sup>. In this first
+        installment of <em>What Would Ada Do?</em>, we'll look at Ada's tasking
+        system &ndash; how it works, some benefits and some disadvantages and
+        dangers.
+      </p>
+
+      <!-- table of contents -------------------------------------------------->
+
+      <details open>
+        <summary>Table of contents</summary>
+        <ol>
+          <li>
+            <a href="#tasks">Tasks</a>
+            <ol>
+              <li><a href="#protected">Protected objects</a></li>
+            </ol>
+          </li>
+          <li><a href="#struct">Structured concurrency</a></li>
+          <li><a href="#pitfalls">Pitfalls</a></li>
+          <li><a href="#conclusion">Conclusion</a></li>
+          <li><a href="#notes">Notes</a></li>
+        </ol>
+      </details>
+
+      <!-- tasks -------------------------------------------------------------->
+
+      <section>
+        <h2 id="tasks">Tasks</h2>
+
+        <p>
+          A task is some piece of code that is run concurrently with the rest of
+          the program<sup><a href="#note-2" id="ref-2a">2</a></sup>.
+        </p>
+
+        <p>
+          As an example, let's write a simple concurrent program. This program
+          will have a task <code>Storage</code>, in which we can first store
+          an integer and later fetch it back. This will be done with two
+          &ldquo;messages&rdquo; <code>Store</code> and <code>Fetch</code>,
+          which must be sent in that order. The main task will first send a
+          message to the <code>Storage</code> task to store a number, and will
+          later fetch it.
+        </p>
+
+        <p>
+          First, note that a task must be declared <em>within</em> some
+          declarative region (such as inside a procedure, a package or another
+          task). In this example, we'll just put it inside the <code>Main</code>
+          procedure.
+        </p>
+
+        <pre>
+<h-k>with</h-k> Ada.Text_IO; <h-k>use</h-k> Ada.Text_IO;
+
+<h-k>procedure</h-k> Main <h-k>is</h-k>
+</pre>
+
+        <p>
+          Now we need to declare the external interface of the
+          <code>Storage</code> task. This involes which &ldquo;messages&rdquo;
+          (which are called <em>entries</em> in Ada) can be called from another
+          task. In this case, we just have two.
+        </p>
+          
+        <pre>
+  <h-k>task</h-k> Storage <h-k>is</h-k>
+    <h-k>entry</h-k> Store (X :     <h-t>Integer</h-t>);
+    <h-k>entry</h-k> Fetch (X : <h-k>out</h-k> <h-t>Integer</h-t>);
+  <h-k>end</h-k> Storage_Task;
+</pre>
+        
+        <p>
+          Entry declarations are largely similar to procedure declarations.
+          <code>Store</code> takes a single integer parameter, while
+          <code>Fetch</code> takes an <code>out Integer</code>. These can be
+          assigned to, which gives us a way to return results.
+        </p>
+
+        <p>
+          Next, we will implement the task. It is fairly straightforward,
+          though take notice of the <code>accept</code> statements. These
+          &ldquo;implement&rdquo; the entries declared above, although they are
+          statements, <em>not</em> declarations. An <code>accept</code>
+          statement effectively blocks until the given entry is called from some
+          other task, at which point they will be executed and control moves
+          onto the next statement.
+        </p>
+
+        <pre>
+  <h-k>task body</h-k> Storage <h-k>is</h-k>
+    Value : <h-t>Integer</h-t>;
+  <h-k>begin</h-k>
+    Put_Line (<h-l>"Storage 1"</h-l>);
+
+    <h-c>-- Handle the 'Store' entry</h-c>
+    <h-k>accept</h-k> Store (X : <h-t>Integer</h-t>) <h-k>do</h-k>
+      Value := X;
+    <h-k>end</h-k> Store;
+
+    Put_Line (<h-l>"Storage 2"</h-l>);
+
+    <h-c>-- Handle the 'Fetch' entry</h-c>
+    <h-k>accept</h-k> Fetch (X : <h-k>out</h-k> <h-t>Integer</h-t>) <h-k>do</h-k>
+      X := Value;
+    <h-k>end</h-k> Fetch;
+
+    Put_Line (<h-l>"Storage 3"</h-l>);
+  <h-k>end</h-k> Storage;
+</pre>
+
+        <p>
+          That concludes the specification and implementation of the
+          <code>Storage</code> task. Finally, we'll implement the
+          <code>Main</code> procedure, which will communicate with the task
+          using the entries. Note that entry calls also block until the
+          corresponding <code>accept</code> has finished processing it. This
+          means that the program will deadlock if <code>Storage.Fetch</code> is
+          called before <code>Storage.Store</code>. This is because the task
+          implementation in the beginning only expects the <code>Store</code>
+          entry, which means both tasks will block forever.
+        </p>
+
+        <pre>
+  X : <h-t>Integer</h-t>;
+<h-k>begin</h-k>
+  Put_Line (<h-l>"Main 1"</h-l>);
+
+  <h-c>-- Call the 'Store' entry on the 'Storage' task</h-c>
+  Storage.Store (<h-l>3</h-l>);
+
+  Put_Line (<h-l>"Main 2"</h-l>);
+
+  <h-c>-- Call the 'Fetch' entry</h-c>
+  Storage.Fetch (X);
+
+  Put_Line (<h-l>"Main "</h-l> &amp; Integer'Image(X));
+<h-k>end</h-k> Main;
+</pre>
+
+        <p>
+          If we run this program, we'll get some output that looks something
+          like this:
+        </p>
+
+        <pre>
+Storage 1
+Main 1
+Storage 2
+Main 2
+Main 3
+Storage 3
+</pre>
+
+        <p>
+          Note that the order in which lines with the same number appear may
+          vary, as those bits of code run concurrently. However, we will
+          <em>always</em> get both lines with <code>1</code> before
+          <code>2</code>, of which both will <em>always</em> come before
+          <code>3</code>. This is because entries are synchronizing &ndash; on
+          entry calls, the caller will block until the corresponding
+          <code>accept</code> finishes, while an <code>accept</code> will block
+          until the corresponding entry is called. In this way, they act like a
+          powerful intra-task function call mechanism.
+        </p>
+
+        <p>
+          One final thing is that we are guaranteed to get all six messages.
+          This is because a scope in Ada will wait for all its contained tasks
+          to finish before it itself stops. If you think of a task like a
+          thread, imagine that there's an implicit <code>thread.join()</code> at
+          the end of every block. One consequence of this is that you can safely
+          access stack-allocated variables from outside of the task (modulo race
+          conditions).
+        </p>
+
+        <p>
+          Ada's concurrency support is more featureful than this, including
+          protected objects to guard against data races, select, delay, and
+          termination statements to accept any of multiple entries or to end the
+          task if all other tasks are done, and task types to store tasks in
+          variables and arrays.
+        </p>
+      </section>
+
+      <!-- structured concurrency --------------------------------------------->
+
+      <section>
+        <h2 id="struct">Structured concurrency</h2>
+
+        <p>
+          One of the greatest advantages of Ada's concurrency support, in my
+          opinion, is that it serves as a genuinely high-level abstraction over
+          lower-level concurrency primitives, like threads, mutexes and
+          channels. Instead of having to manually manage and keep track of
+          different methods of data sharing and synchronization, the task system
+          neatly abstracts over it and takes care of it for you.
+        </p>
+
+        <p>
+          That's not to say that such lower-lovel primitives are unnecessary,
+          but in my experience, the &ldquo;common case&rdquo; is one where the
+          implementation specifics are unimportant. One interesting consequence
+          of this abstraction is that Ada has potentially one of the simplest
+          examples of a deadlock I know of:
+        </p>
+
+        <pre>
+<h-k>procedure</h-k> Main <h-k>is</h-k>
+  <h-k>task</h-k> Locky <h-k>is</h-k>
+    <h-k>entry</h-k> A;
+    <h-k>entry</h-k> B;
+  <h-k>end</h-k> Locky;
+
+  <h-k>task body</h-k> Locky <h-k>is</h-k>
+  <h-k>begin</h-k>
+    <h-c>-- Block until 'A' is called</h-c>
+    <h-k>accept</h-k> A <h-k>do</h-k>
+      <h-k>null</h-k>;
+    <h-k>end</h-k> A;
+  <h-k>end</h-k> Locky;
+<h-k>begin</h-k>
+  <h-c>-- Block until 'B' is accepted</h-c>
+  Locky.B;
+<h-k>end</h-k> Main;
+</pre>
+
+        <p>
+          Whether this is a symptom of a good abstraction of concurrency, a
+          result of bad design, or just a lacking one is arguable.
+        </p>
+
+        <p>
+          Deadlocks aside, the fact that all tasks are guaranteed to finish
+          (even in the face of exceptions) represents one of the earlier forms
+          of structured
+          concurrency<sup><a href="#note-3" id="ref-3a">3</a></sup>.
+        </p>
+      </section>
+
+      <!-- actors ------------------------------------------------------------->
+
+      <section>
+        <h2 id="pitfalls">Pitfalls</h2>
+
+        <p>
+          As mentioned, deadlocks and data races are dead easy in
+          Ada<sup><a href="#note-4" id="ref-4a">4</a></sup>. Although protected
+          objects prevent the latter, they can be quite heavyweight (given that
+          they are essentially fancy mutexes). Ada 202x improves on this area
+          with standard library-support for atomic operations and parallel
+          blocks and loops for more lightweight structured concurrency (and
+          better parallelism support).
+        </p>
+
+        <p>
+          Part of the reason that deadlocks are so easy is because the ordering
+          of entry calls is not part of their interface. Integrating something
+          like session types in order to statically enforce this may be an
+          interesting avenue for
+          exploration<sup><a href="#note-5" id="ref-5a">5</a></sup>.
+        </p>
+
+        <p>
+          The fact that tasks run to completion even in the face of exceptions
+          means that long-running or infinitely spinning tasks need to include
+          complicated logic if they want exceptions to bubble up fast.
+          Exceptions raised in tasks other than the main task will also
+          disappear, which is unfortunate given that the structured concurrency
+          means they could potentially all end up on the same thread.
+        </p>
+
+        <p>
+          Finally, exceptions are also a great way to deadlock:
+        </p>
+
+        <pre>
+<h-k>procedure</h-k> Main <h-k>is</h-k>
+  <h-k>task</h-k> Locky <h-k>is</h-k>
+    <h-k>entry</h-k> A;
+  <h-k>end</h-k> Locky;
+  
+  <h-k>task body</h-k> Locky <h-k>is</h-k>
+  <h-k>begin</h-k>
+    <h-c>-- This task won't terminate until</h-c>
+    <h-c>-- 'A' is called</h-c>
+    <h-k>accept</h-k> A <h-k>do</h-k>
+      <h-k>null</h-k>;
+    <h-k>end</h-k> A;
+  <h-k>end</h-k> Locky;
+
+  E : <h-k>exception</h-k>;
+<h-k>begin</h-k>
+  <h-c>-- This exception won't unwind until</h-c>
+  <h-c>-- all tasks have terminated</h-c>
+  <h-k>raise</h-k> E;
+<h-k>end</h-k> Main;
+</pre>
+      </section>
+
+      <!-- conclusion --------------------------------------------------------->
+
+      <section>
+        <h2 id="conclusion">Conclusion</h2>
+
+        <p>
+          Perhaps the main thing I wanted to present here is what I believe to
+          be a pretty good abstraction for writing concurrent code. Although it
+          is far from perfect, with odd interactions between various other
+          features, a complicated and at times heavy featureset, and accessible
+          ways of shooting your own foot, I think it serves as a better form of
+          concurrency than the common fire-and-forget threading model.
+        </p>
+
+        <p>
+          Other features like generators and async-await serve a similar nice
+          with an equally (if not more) high level of abstraction. Although
+          the tasking model is perhaps more flexible than either of these, you
+          could argue that is largely detrimental (when was the last time you
+          caused a deadlock with a generator?). In that sense, tasks lie perhaps
+          somewhere in between manually working with primitives like threads,
+          channels and mutexes, and writing asynchronous functions which hide
+          the low-level machinery.
+        </p>
+      </section>
+
+      <!-- notes -------------------------------------------------------------->
+
+      <footer>
+        <h2 id="notes">Notes</h2>
+
+        <ol>
+          <li id="note-1">
+            <a href="#ref-1a">^</a> Sometimes, we distinguish between
+            <em>parellelism</em> and <em>concurrency</em>, the latter being a
+            more general term meaning multiple tasks running with some kind of
+            overlapping time periods, while the former specifically refers to
+            multiple tasks running at the same time. These definitions can be
+            argued about, although in this article I'm largely just talking
+            about the general usage here, whether that be implemted with
+            preemptions or multi-core setups.
+          </li>
+          <li id="note-2">
+            <a href="#ref-2a">^</a> See the
+            <a href="https://en.wikibooks.org/wiki/Ada_Programming/Tasking">
+              Ada Programming Wikibooks
+            </a>
+            for more details on tasks and other tools for concurrency.
+          </li>
+          <li id="note-3">
+            <a href="#ref-3a">^</a> See
+            <cite>
+              <a href="https://vorpus.org/blog/notes-on-structured-concurrency-or-go-statement-considered-harmful/">
+                Notes on structured concurrency
+              </a>
+            </cite>
+            and
+            <cite>
+              <a href="https://verdagon.dev/blog/seamless-fearless-structured-concurrency">
+                Seamless, Fearless, and Structured Concurrency
+              </a>
+            </cite>
+            for more on the benefits of structured concurrency.
+          </li>
+          <li id="note-4">
+            <a href="#ref-4a">^</a> This is presumably one of the reasons the
+            SPARK subset of Ada requires the
+            <a href="htttps://en.wikipedia.org/wiki/Ravenscar_profile">
+              Ravenscar profile
+            </a>
+            to be enabled, which disallows task entries completely.
+          </li>
+          <li id="note-5">
+            <a href="#ref-5a">^</a> One challenge here is the fact that multiple
+            tasks can safely call the entries of one task. This means that if we
+            add a <em>third</em> task to the deadlocking example which calls the
+            <code>A</code> entry, then the deadlock gets resolved (with the
+            program raising a <code>Tasking_Error</code> instead). As such,
+            checking if Ada-style tasks respects entry ordering may require
+            checking how every task interacts, which is likely non-trivial if
+            not undecidable.
+          </li>
+        </ol>
+      </footer>
+    </article>
+  </body>
+</html>

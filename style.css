@@ -16,7 +16,7 @@
   --font-small: Helvetica, Arial, sans-serif;
   --font-text:  "PT Serif", Georgia, serif;
 
-  --size-code: 14px/18px;
+  --size-code: 14px/20px;
   --size-text: 16px/24px;
   --size-h1:   36px/48px;
   --size-h2:   30px/40px;
@@ -41,7 +41,7 @@
 
     --col-co: #889;
 
-    --size-code: 16px/20px;
+    --size-code: 16px/22px;
     --size-text: 18px/27px;
     --size-h1:   40px/55px;
     --size-h2:   34px/47px;
@@ -103,7 +103,11 @@ kbd {
   padding: 1px 4px;
 }
 
+footer li { margin: 0.5em 0; }
+
 p { margin: 10px 0; }
+
+sup { line-height: 0; }
 
 /* code --------------------------------------------------------------------- */
 
@@ -113,7 +117,7 @@ h-l { color: var(--col-li); }
 h-t { color: var(--col-ty); }
 
 code { padding: 1px 4px; }
-pre  { padding: 5px 10px; }
+pre  { overflow: auto; padding: 5px 10px; }
 pre, code {
   background-color: var(--col-bg2);
   border-radius: 5px;
