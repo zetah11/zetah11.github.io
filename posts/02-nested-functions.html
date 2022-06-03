@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>Nested functions</title>
+
+    <link rel=stylesheet href="../style.css">
+    <script src="../custom-elements.js"></script>
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>Nested functions</h1>
+        
+        <p>
+          <time>2022 JUNE 03</time>
+          <span>LANG</span>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <p>
+        A
+        <a href="https://thephd.dev/lambdas-nested-functions-block-expressions-oh-my">
+           &ldquo;recent&rdquo; article
+        </a>
+        about the struggle to get nested functions and lambdas into C. This got
+        me curious as to how it is implemented in Ada, where nested functions
+        can be called like any other as well as passed to functions expecting
+        function pointers. Specifically, we'll see how GNAT does it for x86-64.
+      </p>
+
+      <p>
+        The TL;DR is that nested functions are implemented as a kind of closure,
+        where the function itself expects a pointer to the stack frame in the
+        <code>r10</code> register. If we need to go multiple scopes out, then
+        the outer frame pointer is expected to be at the bottom of the frame,
+        effectively creating a linked list of frames we can traverse. To let
+        nested functions be passed as function pointers, we create a structure
+        on the stack containing the actual function pointer and the necessary
+        frame pointer, create a pointer to that structure, set its lowest bit,
+        and send that pointer as the function pointer. Any call to a function
+        pointer now needs to check if the lowest bit is set, and if so,
+        dereference to find the frame pointer, put that in <code>r10</code>,
+        then call the actual function pointer. 
+      </p>
+
+      <!-- toc ---------------------------------------------------------------->
+
+      <nav>
+        <details open>
+          <summary>Table of contents</summary>
+          <ol>
+            <li><a href="#stacky-closures">Stacky closures</a></li>
+            <li><a href="#linked-lists">Linked lists</a></li>
+            <li><a href="#descriptors">Function descriptors</a></li>
+            <li><a href="#why">Why does this work?</a></li>
+            <li><a href="#notes">Notes</a></li>
+          </ol>
+        </details>
+      </nav>
+
+      <!-- stacky closures ---------------------------------------------------->
+
+      <section>
+        <h2 id="stacky-closures">Stacky closures</h2>
+
+        <p>
+          The first example we will look at is rather simple:
+        </p>
+
+        <pre>
+<h-k>function</h-k> Id (X : <h-t>Integer</h-t>) <h-k>return</h-k> <h-t>Integer</h-t> <h-k>is</h-k>
+  <h-k>function</h-k> Inner <h-k>return</h-k> <h-t>Integer</h-t> <h-k>is</h-k> (X);
+<h-k>begin</h-k>
+  <h-k>return</h-k> Inner;
+<h-k>end</h-k> Id;
+</pre>
+
+        <p>
+          <em>
+            Note that the <code>Inner</code> is implicitly a function call,
+            unlike in C. If we wanted the address of the function, we'd write
+            <code>Inner'Access</code>.
+          </em>
+        </p>
+
+        <p>
+          Let's look at the generated assembly for the above function. The code
+          for <code>Id.Inner</code> looks something
+          like<sup><a href="#note-1" id="ref-1a">1</a></sup>:
+        </p>
+
+        <pre>
+<h-t>id__inner</h-t>:
+        <h-k>push</h-k>    rbp
+        <h-k>mov</h-k>     rbp, rsp
+        <h-k>mov</h-k>     [rbp-<h-l>8</h-l>], r10    <h-c># save the frame</h-c>
+        <h-k>mov</h-k>     eax, [r10]      <h-c># return frame-&gt;X</h-c>
+        <h-k>pop</h-k>     rbp
+        <h-k>ret</h-k>     
+</pre>
+
+        <p>
+          The calling convention expects the return value as a 32-bit integer in
+          the <code>eax</code> register, so the important line is the
+          <code>mov eax, [r10]</code>. Nested functions expect what we might
+          call a <em>frame pointer</em> in <code>r10</code>, which points to
+          some place in the stack frame. Further, <code>Id.Inner</code> expects
+          the <code>X</code> variable to be the first value stored at that frame
+          pointer. The stack should therefore look something like this when
+          we're executing <code>Id.Inner</code>:
+        </p>
+
+        <pre>
+,------------------------,
+| (Id.Inner stack frame) |
+|------------------------|
+| ...                    |
+| ...                    |
+| ...                    |
+|------------------------| &lt;-- end of Id stack frame
+| X                      |
+|------------------------| &lt;-- r10 (the frame pointer)
+| ...                    |
+</pre>
+
+        <p>
+          If we had more stack-allocated variables, they'd be just above
+          <code>X</code>, such that we could access them by a simple indexing
+          operation.
+        </p>
+
+        <p>
+          In the generated assembly, there's also a line
+          <code>mov [rbp-8], r10</code>. This just spills that frame pointer to
+          the stack in case we need to modify the <code>r10</code> register
+          (such as if we need to call a nested function that's in a wider
+          scope).
+        </p>
+
+        <p>
+          The generated assembly for the <code>Id</code> function itself is
+          slightly more complicated. It needs to put the <code>X</code>
+          parameter on the stack (since it is passed by register in this
+          calling convention), then create the appropriate frame pointer which
+          it can pass to <code>Id.Inner</code> before it can actually call that
+          function.
+        </p>
+
+        <pre>
+<h-t>id</h-t>:
+        <h-k>push</h-k>    rbp
+        <h-k>mov</h-k>     rbp, rsp
+        <h-k>sub</h-k>     rsp, <h-l>32</h-l>           <h-c># allocate some stack space</h-c>
+        <h-k>lea</h-k>     rax, [rbp+<h-l>16</h-l>]
+        <h-k>mov</h-k>     [rbp-<h-l>8</h-l>], rax      <h-c># save the frame base parent</h-c>
+        <h-k>mov</h-k>     [rbp-<h-l>16</h-l>], edi     <h-c># spill 'x' to the stack</h-c>
+        <h-k>lea</h-k>     rax, [rbp-<h-l>16</h-l>]     <h-c># create the frame pointer</h-c>
+        <h-k>mov</h-k>     r10, rax
+        <h-k>call</h-k>    <h-t>id__inner</h-t>
+        <h-k>leave</h-k>   
+        <h-k>ret</h-k>
+</pre>
+        
+        <p>
+          The parameter <code>X</code> is passed in the <code>edi</code>
+          register. Note that we put the address <code>rbp+16</code> as a stack
+          variable &ndash; this is the frame base parent (sometimes called a
+          dynamic link) and is mostly useful for dynamically sized stack
+          allocated variables<sup><a href="#note-2" id="ref-2a">2</a></sup>. 
+        </p>
+
+        <p>
+          Following that, we spill <code>X</code> onto the stack, and create a
+          pointer to that stack data. If we had more stack variables, we'd put
+          them next to <code>X</code> here. This leaves us with a stack that
+          looks something like this just before the call:
+        </p>
+
+        <pre>
+,---------------------, &lt;-- rsp
+| X                   |
+|---------------------| &lt;-- r10  (frame pointer)
+| (frame base parent) | --&gt;------+
+|=====================| &lt;-- rbp  |
+| prev. rbp           |          |
+|---------------------|          |
+| return pointer      |          |
+|---------------------| &lt;--------+
+| ...                 |
+</pre>
+        
+        <p>
+          With this setup, we have access to the outer variable <code>X</code>
+          from a nested function via the <code>r10</code> register. This matches
+          the setup that <code>Id.Inner</code> expects above, so everything
+          works out nicely.
+        </p>
+      </section>
+
+      <!-- linked lists ------------------------------------------------------->
+
+      <section>
+        <h2 id="linked-lists">Linked lists</h2>
+
+        <p>
+          The next problem we face is that of accessing variables that are more
+          than one scope out. Consider a slightly modified version of the above
+          example.
+        </p>
+
+        <pre>
+<h-k>function</h-k> Id (X : <h-t>Integer</h-t>) <h-k>return</h-k> <h-t>Integer</h-t> <h-k>is</h-k>
+  <h-k>function</h-k> Inner <h-k>return</h-k> <h-t>Integer</h-t> <h-k>is</h-k>
+    <h-k>function</h-k> Extra_Inner <h-k>return</h-k> <h-t>Integer</h-t> <h-k>is</h-k> (X);
+  <h-k>begin</h-k>
+    <h-k>return</h-k> Extra_Inner;
+  <h-k>end</h-k> Inner;
+<h-k>begin</h-k>
+  <h-k>return</h-k> Inner;
+<h-k>end</h-k> Id;
+</pre>
+      
+        <p>
+          Now, <code>Inner</code> itself contains a nested function
+          <code>Extra_Inner</code>, which references the <code>X</code> two
+          scopes up. As we saw, when we call a nested function, we build up a
+          frame with the data and then send a pointer to that frame to the
+          function. Now, <code>Inner</code> could copy the <code>X</code> onto
+          its own stack frame and take a pointer there, but if we change the
+          example such that <code>Extra_Inner</code> modifies it instead of just
+          returning it, we'll see that it has access to the variable itself.
+        </p>
+
+        <p>
+          Instead of copying parameters onto its own stack, GNAT does something
+          slightly more sophisticated. The idea is that we build up a linked
+          list of stack frames, which we can then traverse the required number
+          of times to find the necessary variable. Note that this linked list
+          corresponds to the <em>static lexical scope</em> of the functions,
+          <em>not</em> the dynamic scope. Even if we add recursion to
+          <code>Inner</code>, that linked list stays the same length.
+        </p>
+
+        <p>
+          Effectively, we want something like this:
+        </p>
+
+        <pre>
+,---------------------------,
+| (Extra_Inner stack frame) |
+|===========================| &lt;== Extra_Inner
+| (stack data)              |
+|---------------------------|
+| <strong>previous frame pointer</strong>    | --&gt;--------,
+|---------------------------| &lt;-- r10    |
+| (stack data)              |
+|===========================| &lt;== Inner  |
+| (stack data)              |            |
+|---------------------------|            |
+| <strong>X</strong>                         |            |
+|---------------------------| &lt;----------'
+| (stack data)              |
+|===========================| &lt;== Id
+| ...                       |
+</pre>
+
+        <p>
+          Now, <code>Extra_Inner</code> can find that outer <code>X</code> by
+          first dereferencing <code>r10</code> to get the frame of
+          <code>Inner</code>, then finding the frame pointer and dereferencing
+          <em>that</em>. We get a linked list of frames:
+        </p>
+
+        <pre>r10 -&gt; Inner frame -&gt; Id frame</pre>
+
+        <p>
+          If we look at the generated for <code>Extra_Inner</code>, we'll see it
+          in action:
+        </p>
+
+        <pre>
+<h-t>id__inner__extra_inner</h-t>:
+        <h-k>push</h-k>    rbp
+        <h-k>mov</h-k>     rbp, rsp
+        <h-k>mov</h-k>     [rbp-<h-l>8</h-l>], r10    <h-c># save the frame</h-c>
+        <h-k>mov</h-k>     rax, [r10]      <h-c># frame = frame[0]</h-c>
+        <h-k>mov</h-k>     eax, [rax]      <h-c># return frame-&gt;X</h-c>
+        <h-k>pop</h-k>     rbp
+        <h-k>ret</h-k>
+</pre>
+
+        <p>
+          As before, we spill the frame to the stack, and then traverse it twice
+          to get <code>X</code>. The body of <code>Inner</code> requires a bit
+          more care now, since we expect that previous frame pointer to be
+          stored at the frame pointer we are given in <code>r10</code>. To
+          illustrate, let's check out what happens to <code>Extra_Inner</code>
+          if we rewrite <code>Inner</code> like so: 
+        </p>
+
+        <pre>
+<h-k>function</h-k> Id (X : <h-t>Integer</h-t>) <h-k>return</h-k> <h-t>Integer</h-t> <h-k>is</h-k>
+  <h-k>function</h-k> Inner (Y : <h-t>Integer</h-t>) <h-k>return</h-k> <h-t>Integer</h-t> <h-k>is</h-k>
+    <h-k>function</h-k> Extra_Inner <h-k>return</h-k> <h-t>Integer</h-t> <h-k>is</h-k> (X + Y);
+  <h-k>begin</h-k>
+    <h-k>return</h-k> Extra_Inner;
+  <h-k>end</h-k> Inner;
+<h-k>begin</h-k>
+  <h-k>return</h-k> Inner(<h-l>10</h-l>);
+<h-k>end</h-k> Id;
+</pre>
+
+        <p>
+          Now, <code>Extra_Inner</code> references variables from both its
+          immediate outer scope (the <code>Y</code> from <code>Inner</code>'s
+          frame) and the one outside there (the <code>X</code> from
+          <code>Id</code>'s frame). The generated assembly is a bit heavier,
+          though that is largely due to overflow checking. The relevant section
+          looks like this<sup><a href="#note-3" id="ref-3a">3</a></sup>:
+        </p>
+
+        <pre>
+        <h-k>mov</h-k>     rdx, [r10]      <h-c># prev = frame[0]</h-c>
+        <h-k>mov</h-k>     edx, [rdx]      <h-c># x = prev[0]</h-c>
+        <h-k>mov</h-k>     eax, [r10+<h-l>8</h-l>]    <h-c># y = frame[8]</h-c>
+        <h-k>add</h-k>     eax, edx
+        <h-k>leave</h-k>
+        <h-k>ret</h-k>
+</pre>
+
+        <p>
+          As mentioned, <code>Inner</code> needs to do a bit more work to call
+          <code>Extra_Inner</code>, since it needs to save the previous frame
+          like a stack local, but it is largely similar to before:
+        </p>
+
+        <pre>
+<h-t>id__inner</h-t>:
+        <h-k>push</h-k>    rbp
+        <h-k>mov</h-k>     rbp, rsp
+        <h-k>sub</h-k>     rsp, <h-l>48</h-l>         <h-c># allocate some stack space</h-c>
+        <h-k>mov</h-k>     [rbp-<h-l>48</h-l>], r10   <h-c># save the frame</h-c>
+        <h-k>lea</h-k>     rax, [rbp+<h-l>16</h-l>]
+        <h-k>mov</h-k>     [rbp-<h-l>16</h-l>], rax   <h-c># save the frame base parent</h-c>
+        <h-k>mov</h-k>     [rbp-<h-l>24</h-l>], edi   <h-c># frame[8] = y</h-c>
+        <h-k>mov</h-k>     [rbp-<h-l>32</h-l>], r10   <h-c># frame[0] = prev</h-c>
+        <h-k>lea</h-k>     rax, [rbp-<h-l>32</h-l>]   <h-c># create a new frame pointer</h-c>
+        <h-k>mov</h-k>     r10, rax
+        <h-k>call</h-k>    <h-t>id__inner__extra_inner</h-t>
+        <h-k>leave</h-k>
+        <h-k>ret</h-k>
+</pre>
+
+        <p>
+          At this point, it might be obvious why we need to save the frame
+          with <code>mov [rbp-48], r10</code>, since we overwrite it before we
+          pass it to <code>Extra_Inner</code>. Also note that the code for the
+          <code>Inner</code> without the <code>Y</code> parameter is largely the
+          same, it just doesn't put anything but the previous frame pointer on
+          the stack.
+        </p>
+
+        <p>
+          Just before the call, the stack will look something like this:
+        </p>
+
+        <pre>
+,--------------------,
+| Y                  |
+|--------------------|
+| prev frame pointer | --&gt;--...
+|--------------------| &lt;-- r10
+| frame base parent  | --&gt;--...
+|====================| &lt;== Inner
+| ...                |
+</pre>
+
+        <p>
+          Which is what <code>Extra_Inner</code> expects.
+        </p>
+
+        <p>
+          <em>
+            Note that since the stack grows downwards on x86, things are sort of
+            flipped but also not. In the actual code, the order of
+            <code>Y</code> and the previous frame pointer is the same, but they
+            will be below the frame base parent, not above.
+          </em>
+        </p>
+      </section>
+
+      <!-- function descriptors ----------------------------------------------->
+
+      <section>
+        <h2 id="descriptors">Function descriptors</h2>
+
+        <p>
+          The last piece of the puzzle is how we handle pointers to nested
+          functions. There are many approaches one could take here
+          (<a href="https://thephd.dev/lambdas-nested-functions-block-expressions-oh-my#executable-wha-">some worse than others</a>),
+          including Rust-style monomorphisation. GNAT takes an approach which
+          lets nested functions (and closures in general) be represented as
+          single pointers.
+        </p>
+
+        <p>
+          This is possible for one important reason: code is aligned on 16-byte
+          boundaries. This means that the lowest few bits of a pointer to a
+          function (or a function pointer, as you could call it) are always
+          unset. GNAT exploits this by using the lowest bit as a function
+          descriptor &ndash; if it is set, then the pointer isn't actually a
+          function pointer, but a nested function pointer, which needs special
+          treatment. If it is unset, it is a bog standard function pointer which
+          for which we can do a simple <code>call</code>.
+        </p>
+
+        <p>
+          The main idea is that we create a structure on the stack which
+          contains the actual function pointer as well as the frame pointer it
+          expects.
+        </p>
+      </section>
+
+      <!-- why does this work? ------------------------------------------------>
+
+      <section>
+        <h2 id="why">Why does this work?</h2>
+
+        <p>
+          All of this relies on two fundamental principles:
+        </p>
+
+        <ol>
+          <li>Nested functions are inaccessible from the outside</li>
+          <li>Pointers to nested functions cannot escape their scope</li>
+        </ol>
+
+      </section>
+
+      <!-- notes -------------------------------------------------------------->
+
+      <footer>
+        <h2 id="notes">Notes</h2>
+
+        <ol>
+          <li id="note-1">
+            <a href="#ref-1a">^</a> The actual output is slightly longer and
+            with more redundancy, which I cleaned up for clarity. See
+            <a href="https://godbolt.org/z/P59x8Y8Mf">this Godbolt example</a>
+            for the truth.
+          </li>
+          <li id="note-2">
+            <a href="#ref-2a">^</a> Check out
+            <a href="https://www.cs.csub.edu/~melissa/cs350-f15/notes/notes10.html">
+              these notes
+            </a>
+            for a thorough overview of how static, dynamic and nested
+            subprograms can be implemented using static chains, and why these
+            dynamic links are necessary.
+          </li>
+          <li id="note-3">
+            <a href="#ref-3a">^</a> Something interesting here is that the
+            unoptimized build actually performs the addition twice &ndash; once
+            to check for overflow, and then a second time to actually return the
+            result. This seems to be a quirk of how the builtin operators are
+            implemented in GNAT, since they're expanded in this redundant
+            fashion even before the code is lowered to GIMPLE. Presumably, the
+            implementors either figured that calculating it twice was worth not
+            saving the result or that CSE passes would get rid of it.
+          </li>
+        </ol>
+      </footer>
+    </article>
+  </body>
+</html>

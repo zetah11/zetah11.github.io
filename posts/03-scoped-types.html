@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>Scoped types</title>
+
+    <!-- KaTeX for pretty math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/katex.min.css" integrity="sha384-ZPe7yZ91iWxYumsBEOn7ieg8q/o+qh/hQpSaPow8T6BwALcXSCS6C6fSRPIAnTQs" crossorigin="anonymous">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/katex.min.js" integrity="sha384-ljao5I1l+8KYFXG7LNEA7DyaFvuvSCmedUf6Y6JI7LJqiu8q5dEivP2nDdFH31V4" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/contrib/auto-render.min.js" integrity="sha384-+XBljXPPiv+OzfbB3cVmLHf4hdUFHlWNZN5spNQ7rmHTXpd7WvJum6fIACpNNfIR" crossorigin="anonymous"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        renderMathInElement(document.body, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false },
+          ],
+        });
+      });
+    </script>
+
+    <link rel=stylesheet href="../style.css">
+    <script src="../custom-elements.js"></script>
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>Hello!</h1>
+        
+        <p>
+          <time>2022 JUNE 02</time>
+          <span>LANG</span>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <p>
+        <em>
+          Note: this article uses <a href="https://katex.org">KaTeX</a> to
+          render math, which requires Javascript enabled.
+        </em>
+      </p>
+
+      <p>
+        Closures, and first-class functions in general, are a useful form of
+        dependency injection 
+      </p>
+    </article>
+  </body>
+</html>

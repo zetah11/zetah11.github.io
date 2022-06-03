@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>Implementing nested functions</title>
+
+    <link rel="stylesheet" href="../style.css">
+    <script src="../custom-elements.js"></script>
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>Implementing nested functions</h1>
+
+        <p>
+          <time>2022 MAY 27</time>
+          <span>ASM, LANG</span>
+        </p>
+      </header>
+
+      <p>
+        A nested function is one declared within another function. Several
+        languages support this, though it often just amounts to a normal
+        function hidden from outside its container. Rust has them, but if you
+        attempt to access variables or parameters from outside it, you'll get an
+        error:
+      </p>
+
+      <pre>
+<h-k>fn</h-k> frombulate(x: <h-t>i32</h-t>) {
+    <h-k>fn</h-k> inner(y: <h-t>i32</h-t>) {
+        x + y;
+    }
+}
+</pre>
+
+      <pre>
+error[E0434]: can't capture dynamic environment in a fn item
+ --&gt; src/main.rs:3:9
+  |
+3 |         x + y
+  |         ^
+  |
+  = help: use the `|| { ... }` closure form instead
+</pre>
+
+      <p>
+        In Rust, <code>fn</code> items are just simple function pointers with no
+        data attached, whereas closures can capture their environment. Languages
+        in the Pascal tradition generally <em>do</em> have nested functions,
+        however. Take a look at an example in Ada:
+      </p>
+
+      <pre>
+<h-k>function</h-k> Main (X : <h-t>Integer</h-t>) <h-k>return</h-k> <h-t>Integer</h-t> <h-k>is</h-k>
+  <h-k>type</h-k> <h-t>F</h-t> <h-k>is access function return</h-k> <h-t>Integer</h-t>;
+  <h-k>function</h-k> Inner <h-k>return</h-k> <h-t>Integer</h-t> <h-k>is</h-k> (Num);
+  <h-k>function</h-k> Apply (Func : <h-t>F</h-t>) <h-k>return</h-k> <h-t>Integer</h-t> <h-k>is</h-k> (Func.<h-k>all</h-k>);
+<h-k>begin</h-k>
+  <h-k>return</h-k> Apply (Inner<h-l>'Access</h-l>);
+<h-k>end</h-k> Main;
+</pre>
+
+      <p>
+        Not only are there nested functions, we can even pass pointers to nested
+        functions to other functions expecting normal function pointers, and
+        things somehow just work. There are no closures here (if we somehow were
+        to return one of the nested functions, the memory it referenced would no
+        longer exist by the time we got to executing it, although doing so is
+        not legal Ada), and the function pointer is a <em>single</em> pointer
+        wide.
+      </p>
+
+      <p>
+        This last sentence is kind of a lie &ndash; as we will see, it is true
+        that GNAT gives us pointers to nested functions which are equally as
+        wide as pointers to normal functions (this is not mandated by the Ada
+        standard). We don't actually get a pointer to a function, however, and
+        if you were to try to just call that pointer normally, you'd get a
+        hardware fault because you'd be attempting to execute the stack.
+      </p>
+
+      <p>
+        It is interesting, however, to see how we are able to implement nested
+        functions in a way that lets the nested function itself directly touch
+        its contained heap, even when passed as a function pointer far down the
+        call stack. Although largely displaced by closures nowadays, nested
+        functions do present some intersting restrictions which I believe we can
+        learn a lot from by examining.
+      </p>
+
+      <p>
+        This post will look only at how GNAT does it for Ada on x86-64, though
+        the technique can be generalized.
+      </p>
+
+      <h2>How do normal functions work?</h2>
+
+      <p>
+        At the level of the machine code, a function is just a pointer to some
+        code. Calling a function involves pushing the return address (a pointer
+        to the next instruction) onto the stack, and then jumping to the address
+        of the function. Likewise, returning from a function involves popping
+        the return address from the stack and jumpting to that.
+      </p>
+
+      <p>
+        Parameters are generally passed on the stack and in registers, though
+        the precise way this happens depends upon the calling convention. Since
+        <code>call</code> and </code>ret</code> only modify the stack by a
+        predictable amount and only touch the instruction pointer and the stack
+        pointer, as long as we know how far away from the top of the stack
+        some parameters are and in which registers others are, accessing them
+        is easy.
+      </p>
+
+      <p>
+        Local variables and other things declared inside of a function are
+        generally stored on the stack. When functions are called, they generally
+        allocate some number of bytes by decrementing the stack pointer a
+        certain amount (we decrement because the stack actually grows downwards
+        on x86). On function exit, this memory is deallocated by incrementing
+        the stack pointer back to where it was. To save on time and not have to
+        worry about keeping track of how much space must be deallocated, we tend
+        to reset the stack base pointer to just below the return address, such
+        that deallocating is as simple as copying the base pointer to the stack
+        pointer.
+      </p>
+
+      <pre>
+  <h-c>; save the base pointer and make a new</h-c>
+  <h-c>; base at the current top</h-c>
+  <h-k>push</h-k>    rbp
+  <h-k>mov</h-k>     rbp, rsp
+
+  <h-c>; allocate 32 bytes of stack memory</h-c>
+  <h-k>sub</h-k>     rsp, <h-l>32</h-l>
+
+  <h-c>; put some data in stack memory</h-c>
+  <h-k>mov</h-k>    [rbp - 16], <h-l>123</h-l>
+
+  <h-c>; deallocate the stack space</h-c>
+  <h-k>mov</h-k>    rsp, rbp</h-k>
+  <h-k>pop</h-k>    rbp</h-k>
+  <h-k>ret</h-k>
+</pre>
+
+      <p>
+        Sometimes, functions will also push and pop other registers at the
+        beginning and end of their life, though that too depends upon calling
+        conventions.
+      </p>
+
+      <p>
+        For these normal functions, function pointers are pretty much identical,
+        except instead of specifying the address directly, we keep it in a
+        register or in memory. Compare
+      </p>
+
+      <pre>
+  <h-k>call</h-k>   <h-t>func</h-t>
+</pre>
+
+      <p>and</p>
+
+      <pre>
+  <h-k>mov</h-k>    rax, <h-t>func</h-t>
+  <h-k>call</h-k>   rax
+</pre>
+
+      <h2>How do closures work?</h2>
+
+      <p>
+        Closures are more tricky, since they need their surrounding environment.
+        As such, passing a lone function pointer is not enough, since things
+        like stack offsets will be wrong. Instead, we tend to view closures as a
+        structure containing a raw function pointer and an assosciated bag of
+        data. The function pointer points to a function expecting that bag of
+        data, and that bag of data contains the environment we'd like to close
+        over. In C, that'd look something like this:
+      </p>
+
+      <pre>
+<h-k>struct</h-k> <h-t>closure_t</h-t> {
+  <h-k>int</h-k> (*fun)(<h-k>void</h-k> *);
+  <h-k>void</h-k> *data;
+};
+
+<h-k>int</h-k> adder(<h-k>void</h-k> *raw_data) {
+  <h-k>typedef struct</h-k> { <h-k>int</h-k> x; <h-k>int</h-k> y; } <h-t>data_t</h-t>;
+  <h-t>data_t</h-t> *data = (<h-t>data_t</h-t> *) raw_data;
+  <h-k>return</h-k> data-&gt;x + data-&gt;y;
+};
+</pre>
+
+      <p>
+        A function to which you wish to pass <code>adder</code> now needs to be
+        aware of the fact that it is a closure, and not just a normal function,
+        such that it can be sure to pass that <code>data</code> field onto the
+        actual function pointer.
+      </p>
+
+      <p>
+        Overall, this is a fairly good strategy &ndash; a clever compiler can
+        also just put fields inside the closure structure itself such that it
+        can be returned from its containing function without issue (assuming
+        there are no references to local variables inside).
+      </p>
+
+      <p>
+        It does introduce a separation between closures and normal functions,
+        however. If a function expects a function pointer, it cannot be given a
+        closure since it is at least twice the size. If a function expects a
+        closure, it (probably) cannot be given a function pointer since it may
+        send garbage as one of function's arguments. 
+      </p>
+
+      <h2>How do nested functions work?</h2>
+
+      <p>
+        Calling <code>Apply</code> looks something like this:
+      </p>
+
+      <ol>
+        <li>
+          Allocate stack space for local variables and move <code>num</code>
+          onto the stack.
+        </li>
+        <li>
+          Move the frame parent (two bytes <em>above</em> <code>rbp</code> on
+          the stack &ndash; i.e. in the last call frame) onto the stack.
+        </li>
+        <li>
+          Set <code>frame.num</code> (at <code>rbp-32</code> to
+          <code>num</code>.
+        </li>
+        <li>
+          Save the stack data pointer at <code>rbp-24</code> (eight bytes above
+          <code>frame.num</code>.
+        </li>
+        <li>
+          Set <code>rbp-16</code> to the address of <code>Inner</code>.
+        </li>
+        <li>
+          Set <code>rax</code> to <code>rbp-24</code>. <code>rax</code> now
+          points to <code>frame.num</code> with the function pointer to
+          <code>Inner</code> at <code>rax[8]</code>.
+        </li>
+        <li>
+          Set the lowest bit on <code>rax</code>. This creates a function
+          pointer which we can recognize as a nested function. The data pointer
+          is now at <code>rax[-1]</code> and the function pointer at
+          <code>rax[7]</code>.
+        </li>
+        <li>
+          Move this function to <code>rdi</code>, and set <code>r10</code> to
+          <code>rdp-32</code> &ndash; <code>r10</code> now points to the frame
+          data, while <code>rdi</code> serves as the first argument to
+          <code>Apply</code> (i.e. the function pointer).
+        </li>
+        <li>
+          Call <code>Apply</code>.
+        </li>
+      </ol>
+
+      <h2>Observations</h2>
+
+      <ul>
+        <li>
+          <strong>
+            The <code>r10</code> register is used as the frame data register.
+          </strong>
+          When a nested function is called, it expects this register to contain
+          a pointer to the beginning of the stack frame (which is, in reality,
+          just the beginning of the local variables).
+        </li>
+        <li>
+          <strong>
+            Function pointers to nested functions have the lowest bit set
+          </strong>
+          to indicate that they are a nested function which requires special
+          treatment.
+        </li>
+        <li>
+          <strong>
+            Function pointers to nested functions aren't actually function
+            pointers
+          </strong>
+          and cannot be called by simply zeroing out the lowest bit. Instead,
+          they point to a structure which contains the actual function pointer
+          and a stack frame pointer. When calling said function pointer, the
+          latter can be passed in the <code>r10</code> register (which lets the
+          function act on the stack without issue).
+        </li>
+        <li>
+          In the case that we need to traverse multiple function scopes out to
+          reach the variable, then we place the current frame pointer in the
+          stack frame, and continue from there. This means that we effectively
+          build up a linked list of stack frames, which we can traverse to go to
+          outer scopes.
+        </li>
+      </ul>
+
+      <p>
+        Thus, the introductory Ada code looks something like this in C:
+      </p>
+
+      <pre>
+<h-k>#include</h-k> <h-l>&lt;stdint.h&gt;</h-l>
+
+<h-c>// the pointer to the bottom of the data stack frame</h-c>
+<h-c>// in our case, the only data there is num</h-c>
+<h-k>typedef void</h-k> *<h-t>frame_t</h-t>;
+
+<h-c>// this is effectively the 'F' type in the original</h-c>
+<h-c>// example. note that this must be aligned such that</h-c>
+<h-c>// the lowest bits are always 0 for normal pointers</h-c>
+<h-k>typedef int</h-k> (*<h-t>funptr_t</h-t>)(<h-t>frame_t</h-t>);
+
+<h-c>// nested functions need both an actual function</h-c>
+<h-c>// pointer as well as a pointer to their frame</h-c>
+<h-k>struct</h-k> <h-t>nested_t</h-t> {
+  <h-t>funptr_t</h-t> funptr;
+  <h-t>frame_t</h-t> frame;
+};
+
+<h-c>// the only thing inner needs to know is how to find</h-c>
+<h-c>// 'num' given its frame</h-c>
+<h-k>int</h-k> inner(<h-t>frame_t</h-t> frame) {
+  <h-k>return</h-k> *((<h-k>int</h-k> *) frame);
+}
+
+<h-c>// apply checks if the function pointer refers to a</h-c>
+<h-c>// nested function or not, and calls it appropriately</h-c>
+<h-k>int</h-k> apply(<h-t>funptr_t</h-t> func, <h-t>frame_t</h-t> frame) {
+  <h-k>if</h-k> ((<h-t>intptr_t</h-t>) func &amp; <h-l>1</h-l>) {
+    <h-c>// lowest bit set - nested function</h-c>
+    <h-k>struct</h-k> <h-t>nested_t</h-t> *nested = (<h-k>struct</h-k> <h-t>nested_t</h-t> *) (func - <h-l>1</h-l>);
+    <h-k>return</h-k> nested-&gt;funptr(nested-&gt;frame);
+  } <h-k>else</h-k> {
+    <h-k>return</h-k> func(frame);
+  }
+}
+
+<h-k>int</h-k> square(<h-k>int</h-k> num) {
+  <h-c>// in this simple example, the frame consists only</h-c>
+  <h-c>// of the 'num' parameter</h-c>
+  <h-t>frame_t</h-t> frameptr = &amp;num;
+  <h-k>struct</h-k> <h-t>inner_t</h-t> innerptr = { inner, frameptr };
+
+  <h-c>// set the lowest bit to indicate nestedness</h-c>
+  <h-t>funptr_t</h-t> fp = (<h-t>funptr_t</h-t>) &amp;innerptr + <h-l>1</h-l>;
+
+  apply(fp, frameptr);
+}
+</pre>
+
+      <h2>Conclusion</h2>
+
+      <p>
+        Implementing nested functions like this means that we effectively are
+        just creating a closure, it's just that this closes over a pointer to
+        its containing stack frame. The real &ldquo;magic&rdquo; is the fact
+        that the function descriptor technique lets us pass such functions to
+        other subprograms expecting normal function pointers. This does however
+        mean an extra compare and conditional jump for every call to a function
+        pointer &ndash; since it could potentially be a nested procedure.
+      </p>
+
+      <p>
+        Returning these functions from its containing function is a danger, but
+        Ada prevents this with a trick &ndash; nested functions cannot check
+        against function pointer types declared <em>outside</em> their own
+        scope. This makes it impossible to pass a nested function to the outside
+        without casting to <code>System.Address</code> and back.
+      </p>
+    </article>
+  </body>
+</html>
+
