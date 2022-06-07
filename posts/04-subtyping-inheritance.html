@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>Subtyping &amp; inheritance</title>
+
+    <link rel=stylesheet href="../style.css">
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>Subtyping &amp; inheritance</h1>
+        
+        <p>
+          <time>2022 JUNE 07</time>
+          <span><a href="index.html#lang">LANG</a></span>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <p>
+        In OOP, subtyping generally goes hand-in-hand with inheritance. If some
+        class <code>Cat</code> inherits from another class <code>Fluffy</code>,
+        then the former is a subtype of the latter. This follows from the
+        <a href="https://en.wikipedia.org/wiki/Liskov_substitution_principle">
+          Liskov substitution principle
+        </a>
+        which defines subtypey-ness in terms of substitutability. Since
+        inheritance implies, well, inheritance, then any method you can call on
+        <code>Fluffy</code> you can also call on <code>Cat</code> without issue.
+      </p>
+
+      <p>
+        This could be seen as a specific case of a more general principle of
+        <em>record subtyping</em>: if a have a record <code>R</code>, then any
+        record which has <em>at least all</em> of <code>R</code>'s fields is a
+        subtype. For instance, if I have some type 
+      </p>
+
+      <pre>
+<h-k>type</h-k> <h-t>Pet</h-t> = {
+  name : <h-t>String</h-t>,
+  age  : <h-t>Nat</h-t>,
+}
+</pre>
+
+      <p>
+        then the only thing I can do with a value of that type is access its
+        name or access its age. As such, a type like 
+      </p>
+
+      <pre>
+<h-k>type</h-k> <h-t>Cat</h-t> = {
+  name       : <h-t>String</h-t>,
+  age        : <h-t>Nat</h-t>,
+  fluffiness : <h-t>Float</h-t>,
+}
+</pre>
+
+      <p>
+        can also be used as a <code>Pet</code> since accessing its name or its
+        age are valid operations on this type too.
+      </p>
+
+      <p>
+        Inheritance is a different concept, and has to do with one type copying
+        properties from another. In the <code>Cat</code>/<code>Pet</code>
+        example, we could let <code>Cat</code> inherit some fields from
+        <code>Pet</code> to minimize duplication: 
+      </p>
+
+      <pre>
+<h-k>type</h-k> <h-t>Cat</h-t> = {
+  fluffiness : <h-t>Float</h-t>,
+  <h-k>with</h-k> <h-t>Pet</h-t>
+}
+</pre>
+
+      <p>
+        For records and classes, this kind of inheritance does seem to imply
+        subtyping &ndash; since inheriting guarantees we have at least all of
+        the fields of the parent class.
+      </p>
+
+      <p>
+        This doesn't have to be the case. Consider an <code>enum</code> like
+        this:
+      </p>
+
+      <pre>
+<h-k>type</h-k> <h-t>Bool</h-t> =
+  true,
+  false,
+</pre>
+
+      <p>
+        What would it mean for some other type to be a subtype of this?
+        Following the principle of substitutability, some type
+        <code>HappyBool</code> is a subtype of <code>Bool</code> if we can give
+        a <code>HappyBool</code> to anything expecting a <code>Bool</code>.
+      </p>
+
+      <p>
+        A simple example of something expecting a <code>Bool</code> is an
+        exhaustive pattern match:
+      </p>
+
+      <pre>
+<h-k>fun</h-k> to_string(self: <h-t>Bool</h-t>): <h-t>String</h-t>
+  <h-k>return case</h-k> self
+    <h-k>is</h-k> true  =&gt; <h-l>"happy"</h-l>
+    <h-k>is</h-k> false =&gt; <h-l>"sad"</h-l>
+  <h-k>end</h-k>
+<h-k>end</h-k>
+</pre>
+
+      <p>
+        If <code>HappyBool</code> is to be a subtype of <code>Bool</code>, then
+        <code>to_string</code> must work for all values of
+        <code>HappyBool</code>, which means it must return some string, which
+        means the current branches in the <code>case</code> expression must be
+        exhaustive &ndash; all of which means that <code>HappyBool</code> must
+        have <em>at most</em> all of <code>Bool</code>'s variants.
+      </p>
+
+      <p>
+        Therefore, <code>HappyBool</code> is a subtype:
+      </p>
+
+      <pre>
+<h-k>type</h-k> <h-t>HappyBool</h-t> =
+  true,
+</pre>
+      
+      <p>
+        while <code>ProperBool</code> is in fact a supertype:
+      </p>
+      <pre>
+<h-k>type</h-k> <h-t>ProperBool</h-t> =
+  true,
+  false,
+  file_not_found,
+</pre>
+
+      <p>
+        This has the fun consequence that sum types actually flip the subtyping
+        relationship when inheriting:
+      </p>
+
+      <pre>
+<h-k>type</h-k> <h-t>ProperBool</h-t> =
+  file_not_found,
+  <h-k>with</h-k> <h-t>Bool</h-t>
+</pre>
+
+      <p>
+        In general, inheriting from a product-like type makes you the subtype,
+        while inheriting from a sum-like type makes it the subtype.
+      </p>
+
+      <p>
+        All in all, subtyping and inheritance are two orthogonal concepts, but
+        which are easy to confuse since the latter concept is most common in
+        object-oriented languages where only product-like subtyping is
+        available. There are some languages which feature sum-like subtyping and
+        inheritance (like the in-development
+        <a href="https://github.com/ALANVF/Star-lang-specification/blob/master/design/kinds.md#inheritance">
+          Star</a>) and some which feature an explicit distinction between
+        inheritance and subtyping (like in Ada where types may
+        <a href="http://www.ada-auth.org/standards/rm12_w_tc1/html/RM-3-4.html">
+          derive</a> or be a
+        <a href="http://www.ada-auth.org/standards/rm12_w_tc1/html/RM-3-2-2.html">
+          subtype</a>) .
+      </p>
+
+      <!-- notes -------------------------------------------------------------->
+
+      <footer>
+        <h2 id="notes">Notes</h2>
+
+        <p>
+          This article focuses only on structural subtyping, since I think that
+          that is a cleaner way of demonstrating the substitution principle.
+          Still, the story for nominal subtyping is largely the same, expect
+          with some more explicit declarations of subtype-y ness.
+        </p>
+      </footer>
+    </article>
+  </body>
+</html>
