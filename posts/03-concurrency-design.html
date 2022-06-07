@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>Z: Concurrency</title>
+
+    <link rel=stylesheet href="../style.css">
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>Z: Concurrency</h1>
+        
+        <p>
+          <time>2022 JUNE 07</time>
+          <span>
+            <a href="index.html#lang">LANG</a>,
+            <a href="index.html#z">Z</a>
+          </span>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <section>
+        <p>
+          Some rough ideas for a tiered system of concurrency in Z. No syntax,
+          definite semantics or pretty much anything here represents a genuine
+          design proposal. Instead, this sketches out an idea motivated by the
+          observation that concurrency typically comes in a few, distinct
+          fashions, and that using a single primitive (like fire-and-forget
+          threading) is less than ideal.
+        </p>
+
+        <p>
+          There are three &ldquo;tiers&rdquo; of concurrency &ndash; actors,
+          tasks and local parallelism. Local parallelism consists of
+          iterators that have been parallelised and parallel blocks.
+        </p>
+
+        <pre>
+<h-k>fun</h-k> main()
+  <h-k>let</h-k> cubes =
+    <h-k>parallel for</h-k> i <h-k>in</h-k> <h-l>0</h-l> <h-k>upto</h-k> <h-l>5</h-l> =&gt; i ** <h-l>3</h-l>
+  println(cubes)
+<h-k>end</h-k>
+
+<h-k>fun</h-k> traverse (self : <h-t>Tree</h-t>)
+  <h-k>case</h-k> self
+    <h-k>is</h-k> binary(<h-k>let</h-k> left, <h-k>let</h-k> right)
+      <h-k>parallel</h-k>
+        <h-k>do</h-k> left.traverse()
+      <h-k>and</h-k>
+        <h-k>do</h-k> right.traverse()
+      <h-k>and</h-k>
+        <h-k>do</h-k> println(self.data)
+      <h-k>end</h-k>
+    <h-k>else</h-k>
+      <h-k>null</h-k>
+    <h-k>end</h-k>
+  <h-k>end case</h-k>
+<h-k>end</h-k> traverse
+</pre>
+        
+        <p>
+          The <code>parallel</code> keyword instructs the language to optionally
+          perform whatever code it encompasses in parallel if possible. This is
+          meant to be a lightweight operation, and the compiler may choose to
+          emit sequential code (though with no restrictions on ordering).
+        </p>
+
+        <p>
+          Tasks are more slightly more heavyweight, akin to either
+          runtime-scheduled, OS-scheduled or M:N scheduled threads. Tasks may be
+          declared within a function-like scope, and such a scope will only
+          return once all its contained tasks have terminated.
+        </p>
+
+        <pre>
+<h-k>fun</h-k> main
+  storage.store(5)
+  println(storage.fetch())
+<h-k>where</h-k>
+  <h-k>type</h-k> Storage = <h-k>task</h-k>
+    <h-k>fun</h-k> store(x: <h-t>Int</h-t>)
+    <h-k>fun</h-k> fetch: <h-t>Int</h-t>
+  <h-k>end</h-k>
+
+  <h-k>let</h-k> storage: Storage = <h-k>task</h-k>
+    <h-k>let</h-k> value
+    <h-k>accept</h-k> store(x)
+      value = x
+    <h-k>end</h-k> store
+
+    <h-k>accept</h-k> fetch
+      <h-k>return</h-k> value
+    <h-k>end</h-k> fetch
+  <h-k>end task</h-k>
+<h-k>end</h-k> main
+        </pre>
+
+        <p>
+          Tasks are ran concurrently, potentially with a mechanism for
+          data-sharing/synchronization similar to
+          <a href="01-wwad-concurrency.html">Ada's entries</a>.
+        </p>
+
+        <p>
+          Finally, actors are isolated processes/system threads to which
+          messages can be sent in an asynchronous, non-blocking manner and which
+          handle those messages in a single-threaded fashion (unless some other
+          concurrency primitive is used).
+        </p>
+
+        <pre>
+<h-k>actor</h-k> Counter
+  <h-k>fun</h-k> inc(by: <h-t>Int</h-t>)
+    <h-k>set</h-k> value += by
+  <h-k>end</h-k>
+
+  <h-k>fun</h-k> display
+    <h-k>do</h-k> println(value)
+  <h-k>end</h-k>
+<h-k>private</h-k>
+  <h-k>var</h-k> value: <h-t>Int</h-t> = <h-l>0</h-l>
+<h-k>end</h-k>
+
+<h-k>fun</h-k> main
+  <h-k>do</h-k> Counter.inc(<h-l>5</h-l>)
+  <h-k>do</h-k> Counter.display()
+<h-k>end</h-k>
+</pre>
+
+        <p>
+          Local parallelism is useful for spawning array computations or for
+          easily doing calculations in parallel. Tasks are more suitable for
+          situations where a semi-cooperative mode of concurrency is
+          appropriate, and where a procedure needs to do several things in some
+          unspecified order. Finally, actors are suitable for long-running
+          background tasks which don't need to be updated synchronously with the
+          rest of the program, like databases, UI threads or language servers.
+        </p>
+      </section>
+    </article>
+  </body>
+</html>
