@@ -61,12 +61,26 @@ a {
 
 a[href^="#"] { border-bottom: 1px dotted; }
 
+blockquote {
+  border-left: 5px solid var(--col-fg2);
+  margin-left: 0;
+  padding-left: 35px;
+}
+
 body {
   background-color: var(--col-bg1);
   color: var(--col-fg1);
   margin: auto;
   max-width: var(--width);
   padding: 15px;
+}
+
+dl > dt {
+  font-style: italic;
+}
+
+dd {
+  margin-bottom: 1rem;
 }
 
 h1 { font: normal var(--size-h1) var(--font-text); }
@@ -119,6 +133,20 @@ sup { line-height: 0; }
 
 time { color: var(--col-fg2); }
 
+.two {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: 1fr 1fr;
+  margin: 0 -80px;
+}
+
+@media (max-width: 850px) {
+  .two {
+    display: block;
+    margin: 0;
+  }
+}
+
 /* code --------------------------------------------------------------------- */
 
 h-c { color: var(--col-co); }
@@ -133,3 +161,4 @@ pre, code {
   border-radius: 5px;
   font: var(--size-code) var(--font-code);
 }
+

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>Single ownership, good memory &amp; automatic destructors</title>
+
+    <link rel=stylesheet href="../style.css">
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>Single ownership, good memory, &amp; automatic destructors</h1>
+        
+        <p>
+          <time>2022 JUNE 11</time>
+          <span>
+            LANG, Z
+          </span>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <p>
+        Rust is a language with (largely) automatic memory management. One way
+        to look at this is with a combination of single ownership and automatic
+        <code>drop</code> insertion. For something simple like an integer the
+        drop code for a simple integer does nothing:
+      </p>
+
+      <div class="two">
+        <pre>
+<h-c>// this ...</h-c>
+<h-k>fn</h-k> main() {
+    <h-k>let</h-k> x: <h-t>i32</h-t> = <h-l>5</h-l>;
+}
+</pre>
+      
+        <pre>
+<h-c>// ... is equivalent-ish to this</h-c>
+<h-k>fn</h-k> main() {
+    <h-k>let mut</h-k> x: <h-t>i32</h-t> = <h-l>5</h-l>;
+    <h-t>Drop</h-t>::drop(&amp;<h-k>mut</h-k> x);
+}
+
+<h-k>impl</h-k> <h-t>Drop</h-t> <h-k>for</h-k> <h-t>i32</h-t> {
+    <h-k>fn</h-k> drop(&amp;<h-k>mut self</h-k>) {}
+}
+</pre>
+      </div>
+
+      <p>
+        But for something like <code>Box</code> we can do something clever:
+        use <code>drop</code> to free the memory allocated with
+        <code>Box::new</code>. The <code>Box</code> <em>itself</em> is just some
+        pointer on the stack, but because of Rust's ownership rules, when that
+        <code>drop</code> is finally called, we can be sure that no-one else has
+        a pointer to that memory (modulo any safety violations).
+      </p>
+
+      <pre>
+<h-k>struct</h-k> <h-t>Box</h-t>&lt;<h-t>T</h-t>&gt; {
+    ptr: *<h-k>mut</h-k> <h-t>T</h-t>,
+}
+
+<h-k>impl</h-k>&lt;<h-t>T</h-t>&gt; <h-t>Drop</h-t> <h-k>for</h-k> <h-t>Box</h-t>&lt;<h-t>T</h-t>&gt; {
+    <h-k>fn</h-k> drop(&amp;<h-k>mut self</h-k>) {
+        some_dealloc(<h-k>self</h-k>.ptr);
+    }
+}
+</pre>
+
+      <p>
+        And we can do the same for resources like files to ensure that they are
+        always cleaned up:
+      </p>
+
+      <pre>
+<h-k>impl</h-k> <h-t>Drop</h-t> <h-k>for</h-k> <h-t>File</h-t> {
+    <h-k>fn</h-k> drop(&amp;<h-k>mut self</h-k>) {
+        close(<h-k>self</h-k>);
+    }
+}
+</pre>
+
+      <p>
+        And finally, because of auto-generated drop-glue, this works even when
+        <code>Box</code>es and <code>File</code>s are placed in
+        <code>struct</code>s and the like. Overall, this makes for a pretty nice
+        system where things like dynamic memory management, files and mutexes
+        can all be used without having to worry (too much) about remembering to
+        drop them.
+      </p>
+
+      <!-- the sacred stack --------------------------------------------------->
+
+      <section>
+        <h2 id="stack">The sacred stack</h2>
+
+        <p>
+          Something this system does do is privilege the
+          stack<sup><a href="#note-1" id="ref-1a">1</a></sup>. The Rust compiler
+          (as far as drops, pointers and variables go) doesn't need to concern
+          itself with the heap or anything like it. It just needs to know when
+          to call the necessary drop
+          code<sup><a href="#note-2" id="ref-2a">2</a></sup>. Other than that,
+          the only thing it needs to do is to put things on the stack.
+        </p>
+
+        <p>
+          To some extent, this is a bit odd. The stack can be a quite powerful
+          tool for memory management, and compared with languages like Ada where
+          dynamically-sized objects can be stored, passed to, and returned from
+          functions<sup><a href="#note-3" id="ref-3a">3</a></sup> or even C with
+          its variable-length arrays, Rust's handling of the stack seems
+          limited
+          (<a
+            href="https://doc.rust-lang.org/beta/unstable-book/language-features/unsized-locals.html.">for
+            now</a>).
+        </p>
+
+        <p>
+          Memory management is one of those things where diversity can be very
+          good. For some things, like small, local values functions stack frame
+          is a great place to place them. For bigger things, references to
+          values stored on a generic heap may be better. For highly recursive,
+          immutable structures like a syntax tree, an arena may be an obvious
+          choice.
+        </p>
+
+        <p>
+          We can abstract a bit over these and call these <em>memory pools</em>,
+          places where we can get access to contiguous bytes in which we can
+          write data, and make some further claims:
+        </p>
+
+        <ol>
+          <li>Memory pools should be composable</li>
+          <li>Types should be able to specify their desired memory pool</li>
+        </ol>
+
+        <p>
+          The first point means both that an <em>allocator</em> should be able
+          to be <a href="https://www.youtube.com/watch?v=LIb3L4vKZ7U">
+            constructed from other, simpler allocators</a>, and that a memory
+          pool may need the backing of another memory pool. For instance, an
+          allocator may try to allocate in a fixed-size buffer but fall back to
+          the heap if that fails, and an arena may use the backing of the stack
+          or the heap.
+        </p>
+
+        <p>
+          The second point really just means that the compiler takes care of
+          ensuring values go where we want them. Instead of the compiler only
+          putting things on the stack and having the user do the rest, it could
+          place things in the appropriate memory pool based solely on the type.
+          A benefit of this is that we may fairly easily get things like
+          placement-new for free, since a value never needs to live on the stack
+          if its type requires something else.
+        </p>
+
+        <p>
+          A stronger version of this point could be that <em>only</em> types are
+          allowed to specify their desired memory pools, which would make
+          functions like <code>malloc</code> and <code>Box::new</code> low-level
+          APIs used only in the implementation of memory pools.
+        </p>
+      </section>
+
+      <!-- how would it look? ------------------------------------------------->
+
+      <section>
+        <h2>How would it look?</h2>
+
+        <p>
+          The most pressing question is what the relationship between
+          <em>allocators</em> and <em>memory pools</em> looks like. An allocator
+          is something you can ask for some amount of bytes and which you can
+          later request be deallocated, while a memory pool is something that
+          manages such memory. To that extent, a memory pool always has an
+          assosciated allocator, though an allocator doesn't need to have an
+          assosciated memory pool.
+        </p>
+
+        <p>
+          Note that when dealing with allocators, we usually deal with pointers,
+          whereas we rarely need that when putting things directly on the stack.
+          This is somewhat of a strange lie quite prevalent in modern languages,
+          because the generated assembly of stack values tends to use a lot more
+          pointers than the equivalent C-code, for instance. This is due to a
+          variety of reasons, not least of which, convenience.
+        </p>
+
+        <p>
+          That &ldquo;lie&rdquo; means that in languages like Rust, where we're
+          used to thinking in terms of how much space a value occupies on the
+          stack (where there is a distinct difference between stack-allocated
+          and heap-allocated values), references and pointers in general become
+          very explicit. Remove the prioritization of the stack, however, and
+          suddenly you need a lot more ampersands and stars.
+        </p>
+
+        <p>
+          Therefore, we may want to reframe our perspective into something like
+          this:
+        </p>
+
+        <blockquote>
+          <p>
+            A variable <code>x: T</code> is a <em>reference</em> to some value,
+            of type <code>T</code>.
+          </p>
+        </blockquote>
+
+        <p>
+          In other words, the variable is not itself a &ldquo;container&rdquo;
+          for the value, because that value lives in memory. Variables here are
+          actually just ephemeral creatures that only kind-of exist and have
+          knowledge of where in memory a value is stored. This ultimately means
+          that assosciating different memory pools with different types should
+          be fairly convenient, since a value of such a type is treated
+          &ldquo;as if&rdquo; it lived on the stack in a similar language. 
+        </p>
+      </section>
+
+      <!-- notes -------------------------------------------------------------->
+
+      <footer>
+        <h2 id="notes">Notes</h2>
+
+        <ol>
+          <li id="note-1">
+            <a href="#ref-1a">^</a> To be fair to Rust, it isn't the only
+            language that does this. Since the invention of the dynamic
+            activation record, the stack has been a very convenient place to put
+            non-static things. Still, there are few languages where it is
+            <em>as</em> privileged as it is in Rust.
+          </li>
+          <li id="note-2">
+            <a href="#ref-2a">^</a> Rust <em>does</em> do some special, built-in
+            things for <code>Box</code> and a few other types, but other than
+            dereferencing, none of that has to care about the heap. See the
+            <a href="https://doc.rust-lang.org/reference/special-types-and-traits.html">
+              Rust reference
+            </a>
+            for more.
+          </li>
+          <li id="note-3">
+            <a href="#ref-3a">^</a> Though the latter does require a
+            <a href="https://docs.adacore.com/gnat_ugx-docs/html/gnat_ugx/gnat_ugx/the_stacks.html">
+              secondary stack
+            </a>
+            to actually work.
+        </ol>
+      </footer>
+    </article>
+  </body>
+</html>
