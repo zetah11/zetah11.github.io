@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>Declaration &amp; resolution</title>
+
+    <!-- KaTeX for pretty math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/katex.min.css" integrity="sha384-ZPe7yZ91iWxYumsBEOn7ieg8q/o+qh/hQpSaPow8T6BwALcXSCS6C6fSRPIAnTQs" crossorigin="anonymous">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/katex.min.js" integrity="sha384-ljao5I1l+8KYFXG7LNEA7DyaFvuvSCmedUf6Y6JI7LJqiu8q5dEivP2nDdFH31V4" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/contrib/auto-render.min.js" integrity="sha384-+XBljXPPiv+OzfbB3cVmLHf4hdUFHlWNZN5spNQ7rmHTXpd7WvJum6fIACpNNfIR" crossorigin="anonymous"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        renderMathInElement(document.body, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false },
+          ],
+        });
+      });
+    </script>
+
+    <link rel=stylesheet href="../style.css">
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>Declaration &amp; resolution</h1>
+        
+        <p>
+          <time>2022 JUNE 19</time>
+          <span>
+            <a href="index.html#lang">LANG</a>,
+            <a href="index.html#z">Z</a>
+          </span>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <p>
+        Consider a fairly simple imperative language, which consists of
+        <em>declarations</em> and <em>statements</em>. Declarations declare and
+        define items, like constants, functions and types, and statements change
+        the runtime program state in some way. Declarations may refer to each
+        other and themselves in any arbitrary order, while statements are
+        executed sequentially and may only refer to items created
+        &ldquo;before&rdquo; themselves.
+      </p>
+
+      <pre>
+<h-k>fun</h-k> main
+  <h-k>for</h-k> i <h-k>in</h-k> <h-l>0</h-l> <h-k>upto</h-k> <h-l>100</h-l> <h-k>when</h-k> odd?(i)
+    <h-k>do</h-k> println(i)
+  <h-k>end</h-k>
+<h-k>end</h-k>
+
+<h-k>fun</h-k> odd?(x: <h-t>Int</h-t>) =&gt;
+  x <h-k>mod</h-k> <h-l>2</h-l> = <h-l>1</h-l>
+</pre>
+
+      <p>
+        Because of this setup, name resolution must probably be a two-pass
+        thing, where the compiler first finds all the names of declared items
+        and only then resolves the names. 
+      </p>
+
+      <p>
+        For a batch compiler, that's straightforward enough, but for a
+        query-based compiler, like you might find in a language server, things
+        are a bit more complicated.
+      </p>
+
+      <p>
+        Ideally, we want a query-based pass to be a pure-ish, idempotent
+        operation such that we can easily cache them and only rerun the parts
+        that have changed. Additionally, we probably <em>don't</em> want to run
+        the declaration pass over every single file simultaneously, in order to
+        be able to cache at a more granular level.
+      </p>
+
+      <p>
+        This brings us to an important first clue. When we are just
+        declaring the items in a given file, we
+        <em>
+          do not need to know what is going on in other files
+        </em>.<sup><a href="#note-1" id="ref-1">1</a></sup>
+        The big win here is that name declaration can happen file-by-file. This
+        seems to imply that (part of) the declaration pass should look like
+        this:
+      </p>
+
+      <pre>
+decls_in_file: <h-t>List</h-t>(<h-t>Ast</h-t>) -&gt; <h-t>List</h-t>(<h-t>Name</h-t>)
+</pre>
+
+      <p>
+        with the AST list containing all of the trees in a given file. This
+        function can be a dead simple recursive pattern match, and is easily
+        pure and idempotent.
+      </p>
+
+      <p>
+        Note also that this function also doesn't need to care about statements
+        and the names declared within those. Because of their sequential and
+        progressively scoped nature, names declared in a statement block are
+        very naturally handled by the resolution pass.
+      </p>
+
+      <p>
+        This isn't the whole story, however. If our language was a simple
+        statements-within-declarations kind of language, then the list of names
+        is a perfectly fine thing for the <code>decls_in_file</code> function to
+        return (since there's only the top-level declaration block). If we want
+        to support inline modules or declarative sections within a statement
+        block, however, then things will get a bit more hairy. 
+      </p>
+
+      <p>Consider:</code>
+
+      <pre>
+<h-k>fun</h-k> main
+  <h-k>let</h-k> x = hidden()
+  <h-k>do</h-k> println(x)
+<h-k>where</h-k> 
+  <h-k>fun</h-k> hidden: <h-t>Int</h-t>
+    <h-k>let</h-k> b, c = <h-l>2</h-l>, <h-l>3</h-l>
+    <h-k>then</h-k>
+      <h-k>return</h-k> d
+    <h-k>where</h-k>
+      <h-k>let</h-k> d = a + b + c
+    <h-k>end</h-k>
+  <h-k>end</h-k>
+
+  <h-k>let</h-k> a = <h-l>4</h-l>
+<h-k>end</h-k>
+</pre>
+
+      <p>
+        Here, we have a declaration (of <code>main</code>), which contains some
+        statements (the <code>let</code> and <code>do</code>), but also another
+        declarative section (introduced by the <code>where</code> keyword).
+        Inside that section, two more items are declared (<code>hidden</code>
+        and <code>a</code>). The function itself contains some statements, one
+        of which is a block statement that contains a declarative section, and
+        that declarative section is allowed to reference items created by
+        statements preceeding this one.
+      </p>
+
+      <p>
+        This example is needlessly convoluted, but the ability to declare
+        function local types and items can be quite a useful method of
+        encapsulation, as something slightly more lightweight than a private
+        module, for example.
+      </p>
+
+      <p>
+        Regardless, the big takeaway is that even within a file, the declared
+        items should form something closer to a tree than a list. For the
+        example above, we may want to end up with something like this:
+      </p>
+
+      <pre>
+(<h-l>file</h-l>)
+<h-c>└─</h-c> main
+<h-c>   ├─</h-c> a
+<h-c>   ├─</h-c> hidden
+<h-c>   │  └─</h-c> (<h-l>statements</h-l>)
+<h-c>   │    ├─</h-c> b
+<h-c>   │    ├─</h-c> c
+<h-c>   │    └─</h-c> (<h-l>then</h-l>)
+<h-c>   │       ├─</h-c> d
+<h-c>   │       └─</h-c> (<h-l>statements</h-l>)
+<h-c>   └─</h-c> (<h-l>statements</h-l>)
+<h-c>      └─</h-c> x
+</pre>
+
+
+      <h2>Resolving</h2>
+
+      <p>
+        With that information, we should be able to resolve names. This pass
+        may no longer be file local, since we might be importing items from
+        other modules in other files. However, that is fine &ndash; we can just
+        issue a query that runs the declaration pass on the appropirate file(s)
+        whenever we hit an import. That way, we can ensure that the resolver
+        pass doesn't need any more non-file-local information than absolutely
+        necessary, which keeps the caching granular and nice.
+      </p>
+
+      <p>
+        But how exactly do we approach the resolution? When we are recursing
+        through the syntax trees, how do we keep track of where in the
+        declaration tree we are? This gets especially tricky with declaration
+        blocks, like in the example, where the actual declarative section is
+        without a name and within some statement.
+      </p>
+
+      <p>
+        We can employ another key observation here: we very rarely care about
+        looking <em>inside</em> a scope, but we very often do care about looking
+        <em>outside</em> one. Pretty much only in the case of modules do we even
+        care about going inside of a scope to find more names, and it's pretty
+        much always explicit when we're doing that (because of imports or
+        <code>Module.name</code> syntax). 
+      </p>
+
+      <p>
+        This seems to suggest that the important information is not which scopes
+        a scope contains, but which scope is the parent of some other scope.
+      </p>
+      
+      <p>
+        We still need some way of figuring out which scope we are in while
+        traversing a syntax tree, but that can be achieved by assosciating each
+        scope with a unique id and each scope-opening construct (block,
+        declaration, etc) with the id of its scope.
+      </p>
+
+      <div class="two">
+        <pre>
+<h-c>file</h-c>[<h-k>0</h-k>]:
+  <h-c>fun</h-c>[<h-k>1</h-k>] main:
+    <h-c>decls</h-c>:
+      <h-c>fun</h-c>[<h-k>2</h-k>] hidden:
+        <h-c>stmts</h-c>[<h-k>3</h-k>]:
+          <h-c>let</h-c>[<h-k>4</h-k>] b = <h-l>2</h-l>
+          <h-c>let</h-c>[<h-k>5</h-k>] c = <h-l>3</h-l>
+          <h-c>then</h-c>[<h-k>6</h-k>]:
+            <h-c>decls</h-c>:
+              <h-c>let</h-c>[<h-k>7</h-k>] d = a + b + c
+            <h-c>stmts</h-c>:
+              <h-c>return</h-c> d
+      <h-c>let</h-c>[<h-k>8</h-k>] a = <h-l>4</h-l>
+    <h-c>stmts</h-c>[<h-k>9</h-k>]:
+      <h-c>let</h-c>[<h-k>10</h-k>] x = hidden()
+      <h-c>do</h-c> println(x)
+</pre>
+
+        <pre>
+ <h-k>0</h-k>: (<h-l>file</h-l>)
+    - main
+ <h-k>1</h-k>: main         [in <h-k>0</h-k>]
+    - a
+    - hidden
+ <h-k>2</h-k>: hidden       [in <h-k>1</h-k>]
+ <h-k>3</h-k>: (<h-l>statements</h-l>) [in <h-k>2</h-k>]
+    - b
+    - c
+ <h-k>4</h-k>: b            [in <h-k>3</h-k>]
+ <h-k>5</h-k>: c            [in <h-k>3</h-k>]
+ <h-k>6</h-k>: (<h-l>then</h-l>)       [in <h-k>3</h-k>]
+    - d
+ <h-k>7</h-k>: d            [in <h-k>6</h-k>]
+ <h-k>8</h-k>: a            [in <h-k>1</h-k>]
+ <h-k>9</h-k>: (<h-l>statements</h-l>) [in <h-k>1</h-k>]
+    - x
+<h-k>10</h-k>: x            [in <h-k>9</h-k>]
+</pre>
+      </div>
+
+      <p>
+        Note that each declaring construct (<code>fun</code>, <code>let</code>,
+        etc.) has been assosciated with the id of the scope it introduces. Each
+        scope also contains a list of the names declared in that scope in the
+        form it appears in the source. Ultimately, we end up with an AST type
+        that looks something like this:
+      </p>
+
+      <pre>
+<h-k>enum</h-k> <h-t>Decl</h-t> {
+    <h-l>Fun</h-l>(<h-t>ScopeId</h-t>, <h-t>Name</h-t>, <h-t>Vec</h-t>&lt;<h-t>Decl</h-t>&gt;, <h-t>Stmts</h-t>),
+    <h-l>Let</h-l>(<h-t>ScopeId</h-t>, <h-t>Name</h-t>, <h-t>Expr</h-t>),
+    <h-c>// ...</h-c>
+}
+
+<h-k>struct</h-k> <h-t>Stmts</h-t> {
+    scope: <h-t>ScopeId</h-t>,
+    stmts: <h-t>Vec</h-t>&lt;<h-t>Stmt</h-t>&gt;,
+}
+
+<h-k>enum</h-k> <h-t>Stmt</h-t> {
+    <h-l>Do</h-l>(<h-t>Expr</h-t>),
+    <h-l>Let</h-l>(<h-t>ScopeId</h-t>, <h-t>Name</h-t>, <h-t>Expr</h-t>),
+    <h-l>Then</h-l>(<h-t>ScopeId</h-t>, <h-t>Vec</h-t>&lt;<h-t>Decl</h-t>&gt;, <h-t>Stmts</h-t>),
+    <h-c>// ...</h-c>
+}
+
+<h-c>// ...</h-c>
+</pre>
+
+      <p>
+        And a file scope type that looks like this:
+      </p>
+
+      <pre>
+<h-k>enum</h-k> <h-t>ScopeName</h-t> {
+    <h-l>File</h-l>,
+    <h-l>StatementList</h-l>,
+    <h-l>Block</h-l>,
+    <h-l>Name</h-l>(<h-t>Name</h-t>),
+}
+
+<h-k>struct</h-k> <h-t>Scope</h-t> {
+    name: <h-t>ScopeName</h-t>,
+    parent: <h-t>Option</h-t>&lt;<h-t>ScopeId</h-t>&gt;,
+    children: <h-t>Vec</h-t>&lt;(<h-t>String</h-t>, <h-t>name</h-t>)&gt;,
+}
+
+<h-k>struct</h-k> <h-t>Scopes</h-t> {
+    scopes: <h-t>HashMap</h-t>&lt;<h-t>ScopeId</h-t>, <h-t>Scope</h-t>&gt;,
+}
+</pre>
+
+      <p>
+        Resolving a name just involves keeping track of the nearest scope id,
+        and consulting the appropriate <code>Scopes</code>.
+      </p>
+
+      <pre>
+<h-k>impl</h-k> <h-t>Scopes</h-t> {
+    <h-k>fn</h-k> find_name(&amp;<h-k>self</h-k>, at: <h-t>ScopeId</h-t>, name: &amp;<h-t>str</h-t>) -&gt; <h-t>Option</h-t>&lt;<h-t>Name</h-t>&gt; {
+        <h-k>let</h-k> scope = <h-k>self</h-k>.scopes.get(id).unwrap();
+
+        <h-c>// search this scope</h-c>
+        <h-k>for</h-k> (other, res) <h-k>in</h-k> scope.children.iter() {
+            <h-k>if</h-k> other == name {
+                <h-k>return</h-k> <h-l>Some</h-l>(res);
+            }
+        }
+
+        <h-c>// if not found, search the parent scope</h-c>
+        scope.parent
+            .map(|at| <h-k>self</h-k>.find_name(at, name)
+    }
+}
+</pre>
+
+      <p>
+        There's some extra care needed to handle statements and statement scopes
+        properly, but that's the general idea.
+      </p>
+
+      <!-- notes -------------------------------------------------------------->
+
+      <footer>
+        <h2 id="notes">Notes</h2>
+
+        <ol>
+          <li id="note-1">
+            <a href="#ref-1">^</a> This is assuming a lack of features like
+            macros which are
+            <ol>
+              <li>scoped like any other item, and</li>
+              <li>able to create item names.</li>
+            </ol>
+            If we need to know the lexical scope in order to determine what
+            names are declared in a scope, this two-pass process will no longer
+            be viable.
+          </li>
+        </ol>
+      </footer>
+    </article>
+  </body>
+</html>

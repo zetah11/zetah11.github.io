@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>Verifying gnome sort</title>
+
+    <link rel=stylesheet href="../style.css">
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>Verifying gnome sort</h1>
+        
+        <p>
+          <time>2022 MAY 27</time>
+          <span>LANG, Z</span>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <p>
+        Gnome sort is a sorting algorithm similar to insertion sort that does
+        not use any nested sorts. It sorts the array in-place by consequtively
+        swapping adjacent elements until a subsection of the array is sorted.
+        In this post, I'll be implementing the algorithm in Ada, C, and Rust,
+        and use static verification tools to ensure the implementations works
+        correctly. In pseudocode, the sort looks something like this
+        (for zero-based arrays):<sup><a href="#note-1" id="ref-1">1</a></sup>
+      </p>
+
+      <pre>
+<h-k>procedure</h-k> <h-t>gnomeSort</h-t>(a[]):
+  pos := <h-l>0</h-l>
+  <h-k>while</h-k> pos &lt; <h-t>length</h-t>(a):
+    <h-k>if</h-k> pos == <h-l>0</h-l> <h-k>or</h-k> a[pos] &gt;= a[pos-<h-l>1</h-l>]:
+      pos := pos + <h-l>1</h-l>
+    <h-k>else</h-k>:
+      <h-k>swap</h-k> a[pos] <h-k>and</h-k> a[pos-<h-l>1</h-l>]
+      pos := pos - <h-l>1</h-l>
+</pre>
+
+      <p>
+        Note here that the <code>pos</code> variable both increases and
+        decreases, which will make it harder to prove non-termination (since we
+        can't rely on monotonicity). Another subtelty with the algorithm is that
+        the <code>or</code> operator in the <code>if</code> must be
+        short-circuiting. Otherwise, the <code>a[pos] &gt;= a[pos-1]</code> is
+        not well defined.
+      </p>
+
+      <!-- toc ---------------------------------------------------------------->
+
+      <nav>
+        <details open>
+          <summary>Table of contents</summary>
+          <ol>
+            <li><a href="#section-1">C</a></li>
+            <li>
+              <a href="#section-2">Section 2</a>
+              <ol>
+                <li><a href="#sub">A subsection, here</a></li>
+              </ol>
+            </li>
+            <li><a href="#notes">Notes</a></li>
+          </ol>
+        </details>
+      </nav>
+
+      <!-- section ------------------------------------------------------------>
+
+      <section>
+        <h2 id="section-1">Section 1</h2>
+
+        <p>
+          Sections are kinda cool sometimes.
+        </p>
+      </section>
+
+      <!-- section ------------------------------------------------------------>
+
+      <section>
+        <h2 id="section-2">Section 2</h2>
+
+        <p>
+          Maybe even radical, if you like.
+        </p>
+
+        <h3 id="sub">A subsection, here</h3>
+
+        <p>If you hit <kbd>Alt</kbd>+<kbd>F4</kbd> you get some cool hacks.</p>
+      </section>
+
+      <!-- notes -------------------------------------------------------------->
+
+      <footer>
+        <h2 id="notes">Notes</h2>
+
+        <ol>
+          <li id="note-1">
+            <a href="#ref-1">^</a> From
+            <a href="https://en.wikipedia.org/wiki/Gnome_sort">Wikipedia</a>.
+          </li>
+        </ol>
+      </footer>
+    </article>
+  </body>
+</html>
