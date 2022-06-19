@@ -6,21 +6,6 @@
 
     <title>Declaration &amp; resolution</title>
 
-    <!-- KaTeX for pretty math -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/katex.min.css" integrity="sha384-ZPe7yZ91iWxYumsBEOn7ieg8q/o+qh/hQpSaPow8T6BwALcXSCS6C6fSRPIAnTQs" crossorigin="anonymous">
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/katex.min.js" integrity="sha384-ljao5I1l+8KYFXG7LNEA7DyaFvuvSCmedUf6Y6JI7LJqiu8q5dEivP2nDdFH31V4" crossorigin="anonymous"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/contrib/auto-render.min.js" integrity="sha384-+XBljXPPiv+OzfbB3cVmLHf4hdUFHlWNZN5spNQ7rmHTXpd7WvJum6fIACpNNfIR" crossorigin="anonymous"></script>
-    <script>
-      document.addEventListener("DOMContentLoaded", () => {
-        renderMathInElement(document.body, {
-          delimiters: [
-            { left: '$$', right: '$$', display: true },
-            { left: '$', right: '$', display: false },
-          ],
-        });
-      });
-    </script>
-
     <link rel=stylesheet href="../style.css">
   </head>
 
@@ -306,7 +291,7 @@ decls_in_file: <h-t>List</h-t>(<h-t>Ast</h-t>) -&gt; <h-t>List</h-t>(<h-t>Name</
 <h-k>struct</h-k> <h-t>Scope</h-t> {
     name: <h-t>ScopeName</h-t>,
     parent: <h-t>Option</h-t>&lt;<h-t>ScopeId</h-t>&gt;,
-    children: <h-t>Vec</h-t>&lt;(<h-t>String</h-t>, <h-t>name</h-t>)&gt;,
+    children: <h-t>Vec</h-t>&lt;(<h-t>String</h-t>, <h-t>Name</h-t>)&gt;,
 }
 
 <h-k>struct</h-k> <h-t>Scopes</h-t> {
