@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>CPS &amp; assembly</title>
+
+    <link rel=stylesheet href="../style.css">
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>CPS &amp; assembly</h1>
+        
+        <p>
+          <time>2022 MAY 27</time>
+          <span>
+            <a href="index.html#asm">ASM</a>
+          </span>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <p>
+        x86 machine code is inherently in continuation passing style, where the
+        continuation is passed as an address on the stack (pushed by
+        <code>call</code> and jumped to by <code>ret</code>). This is a useful
+        perspective, because it makes multi-continuation setups quite natural.
+      </p>
+
+      <p>
+        In particular, escape continuations, while hard to do in normal C, are
+        quite natural in assembly. Something like this in a pseudo-Javascript
+      </p>
+
+      <pre>
+<h-k>function</h-k> div(x, y; then, escape) {
+  <h-k>if</h-k> (y == <h-l>0</h-l>)
+    escape(<h-l>0</h-l>);
+  <h-k>else</h-k>
+    then(x / y);
+}
+
+div(<h-l>10</h-l>, <h-l>0</h-l>;
+  res =&gt; res + <h-l>1</h-l>,
+  res =&gt; res - <h-l>1</h-l>);
+</pre>
+
+      <p>
+        (where <code>then</code> and <code>escape</code> are the continuations)
+        becomes something like this in x64 assembly
+      </p>
+
+      <pre>
+<h-t>main</h-t>:
+  <h-k>mov</h-k> rdi, <h-l>10</h-l>
+  <h-k>xor</h-k> rsi, rsi
+  
+  <h-k>lea</h-k> rax, [<h-t>.escape</h-t>]
+  <h-k>push</h-k> rax
+  <h-k>lea</h-k> rax, [<h-t>.then</h-t>]
+  <h-k>push</h-k> rax
+
+  <h-k>jmp</h-k> div
+
+<h-t>.escape</h-t>:
+  <h-k>dec</h-k> rax
+  <h-k>ret</h-k>
+
+<h-t>.then</h-t>:
+  <h-k>inc</h-k> rax
+  <h-k>ret</h-k>
+
+
+<h-t>div</h-t>:
+  <h-k>push</h-k> rbp
+  <h-k>mov</h-k> rbp, rsp
+
+  <h-k>cmp</h-k> rsi, <h-l>0</h-l>
+  <h-k>jne</h-k> <h-t>.ok</h-t>
+
+<h-t>.err</h-t>:
+  <h-k>xor</h-k> rax, rax
+
+  <h-k>leave</h-k>
+  <h-k>add</h-k> rsp, <h-l>16</h-l>
+  <h-k>mov</h-k> rbx, [rsp-<h-l>8</h-l>]
+  <h-k>jmp</h-k> [rbx]
+
+<h-t>.ok</h-t>:
+  <h-k>mov</h-k> rax, rdi
+  <h-k>idiv</h-k> rsi
+
+  <h-k>leave</h-k>
+  <h-k>add</h-k> rsp, <h-l>16</h-l>
+  <h-k>mov</h-k> rbx, [rsp-<h-l>16</h-l>]
+  <h-k>jmp</h-k> [rbx]
+</pre>
+
+      <p>
+        The important pattern is this:
+      </p>
+
+      <pre>
+  <h-k>lea</h-k> rax, [<h-t>.cont</h-t>]
+  <h-k>push</h-k> rax
+  <h-k>jmp</h-k> <h-t>target</h-t>
+</pre>
+
+      <p>
+        This is a stand-in for
+        <code>call target</code><a href="#note-1" id="ref-1"><sup>1</sup></a>,
+        but with the return pointer explicit. A call to <code>div</code> should
+        therefore make the stack look something like this:
+      </p>
+
+      <pre>
+| ...        |
++------------+ &lt;-- rbp
+| prev rbp   |
++------------+
+| then       |
++------------+
+| escape     |
++------------+
+| ...        |
+</pre>
+
+      <p>
+        A more natural implementation of escape continuations would use the
+        normal <code>call</code> and <code>ret</code> instructions, which would
+        leave non-escaping code looking largely the same. This gives the caller
+        the responsbility of cleaning up the escape pointer, meaning a typical
+        escapable call might look something like
+      </p>
+
+      <pre>
+  <h-k>lea</h-k> rax, [<h-t>.escape</h-t>]
+  <h-k>push</h-k> rax
+  <h-k>call</h-k> <h-t>func</h-t>
+  <h-k>pop</h-k>
+</pre>
+
+      <!-- notes -------------------------------------------------------------->
+
+      <section>
+        <h2>Notes</h2>
+
+        <ol>
+          <li id="note-1">
+            <a href="#ref-1">^</a> x64 is not able to encode a <code>push</code>
+            instruction with a 64-bit immediate operand, which is why the
+            <code>lea</code> is necessary here. On 32-bit systems,
+            <code>push .cont</code> can be used instead.
+          </li>
+        </ol>
+      </section>
+    </article>
+  </body>
+</html>
