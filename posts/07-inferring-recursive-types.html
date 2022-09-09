@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>Inferring recursive types</title>
+
+    <!-- KaTeX for pretty math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/katex.min.css" integrity="sha384-ZPe7yZ91iWxYumsBEOn7ieg8q/o+qh/hQpSaPow8T6BwALcXSCS6C6fSRPIAnTQs" crossorigin="anonymous">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/katex.min.js" integrity="sha384-ljao5I1l+8KYFXG7LNEA7DyaFvuvSCmedUf6Y6JI7LJqiu8q5dEivP2nDdFH31V4" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/contrib/auto-render.min.js" integrity="sha384-+XBljXPPiv+OzfbB3cVmLHf4hdUFHlWNZN5spNQ7rmHTXpd7WvJum6fIACpNNfIR" crossorigin="anonymous"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        renderMathInElement(document.body, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false },
+          ],
+        });
+      });
+    </script>
+
+    <link rel=stylesheet href="../style.css">
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>Inferring recursive types</h1>
+        
+        <p>
+          <time>2022 SEP 09</time>
+          <span>
+            <a href="index.html#types">TYPES</a>
+          </span>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <p>
+        A standard Hindley-Milner-like type checker typically has a function
+      </p>
+
+      <pre>
+unify: <h-t>Type</h-t> &times; <h-t>Type</h-t> -&gt; <h-t>Maybe Subst</h-t>
+</pre>
+
+      <p>
+        which attempts to find a substitution of unification variables such that
+        applying it to both type produces the same type &ndash; effectively, it
+        is a kind of type equivalence test.
+      </p>
+
+      <p>
+        Also typically, we have the so-called &ldquo;occurs check&rdquo; when
+        unifying a unification variable with some other type:
+      </p>
+
+      <pre>
+<h-k>let</h-k> unify = <h-k>function</h-k>
+  <h-c>(* ... *)</h-c>
+  | (<h-l>Var</h-l> v, other) | (other, <h-l>Var</h-l> v) -&gt;
+      <h-k>if</h-k> occurs_in v other <h-k>then</h-k> fail <h-l>"occurs check"</h-l>
+      <h-k>else</h-k> with_var v other
+  <h-c>(* ... *)</h-c>
+</pre>
+
+      <p>
+        The purpose of this check is to prevent infinite loops in the typer. For
+        instance, a program like this
+      </p>
+
+      <pre><h-k>let</h-k> f () = f</pre>
+
+      <p>would give us a constraints like</p>
+
+      <pre>'a = unit -&gt; 'a</pre>
+
+      <p>
+        And although the <code>unify</code> function handles this gracefully (by
+        creating a substitution <code>{ 'a ==&gt; unit -&gt; 'a }</code>), we'd
+        run into trouble if we ever want to substitute out the type variables in
+        the inferred types in the program:
+      </p>
+
+      <pre>
+<h-k>let</h-k> f : unit -&gt; 'a = &lambda;(). f
+<h-k>let</h-k> f : unit -&gt; unit -&gt; 'a = &lambda;(). f
+<h-k>let</h-k> f : unit -&gt; unit -&gt; unit &gt; 'a = &lambda;(). f
+<h-c>-- etc.</h-c>
+</pre>
+
+      <p>
+        What if, instead of erroring on an occurs check, we replaced the
+        &ldquo;faulty&rdquo; type with a &mu;-type?
+      </p>
+
+      <details open>
+        <summary>A tiny introduction to &mu;-types</summary>
+
+        <p>
+          &mu;-types (often spelt mu-types) are a way of modelling recursive
+          types. A &mu;-type looks like
+        </p>
+
+        $$
+        \mu \alpha. T
+        $$
+
+        <p>
+          Where the $\mu$ introduces a &mu;-type with the type variable $\alpha$
+          (similar to how $\lambda \alpha. x$ is used to denote a lambda
+          parameterized by $\alpha$ with $x$ as the body).
+        </p>
+
+        <p>
+          Within the &mu;-type (inside the $T$ above), the variable $\alpha$
+          refers to the entire &mu;-type itself. For instance, in
+        </p>
+
+        $$
+        \mu \alpha. 1+\alpha
+        $$
+
+        <p>
+          the $\alpha$ refers to $\mu\alpha. 1+\alpha$. We can <em>unroll</em>
+          such a type by removing the $\mu$ and replacing the variable with the
+          type we are unrolling. Unrolling the above once gives
+        </p>
+
+        $$
+        (1 + \alpha)[\alpha\mapsto\mu\alpha.1+\alpha] = 1 + (\mu\alpha.1+\alpha)
+        $$
+
+        <p>
+          One useful way of thinking of &mu;-types is to replace the $\mu$ form
+          with a recursive type definition like so:
+        </p>
+
+        <pre>
+<h-k>type</h-k> <h-t>T</h-t> = 1 + <h-t>T</h-t> <h-k>in</h-k> <h-t>T</h-t>
+</pre>
+        
+        <p>
+          Note also that only the part &ldquo;enclosed&rdquo; by the &mu; is
+          recursive; unrolling
+        </p>
+
+        $$
+        \mathrm{Int} \times \mu\alpha.1+\alpha
+        $$
+
+        <p>gives</p>
+
+        $$
+        \mathrm{Int} \times (1+(\mu\alpha.1+\alpha))
+        $$
+
+        <p>and <em>not</em></p>
+
+        $$
+        \mathrm{Int} \times (1 + (\mathrm{Int} \times \mu\alpha.1+\alpha))
+        $$
+      </details>
+
+      <p>
+        This is actually quite a simple modification to our unifier; instead of
+        failing at an occurs check, we just generate a &mu;-type from the
+        unification variable and the type:
+      </p>
+
+      <pre>
+<h-k>let</h-k> make_mu v ty =
+  <h-k>let rec</h-k> inner name = <h-k>function</h-k>
+    | <h-l>Var</h-l> w <h-k>when</h-k> v = w -&gt; name
+    | <h-l>Var</h-l> w -&gt; <h-l>Var</h-l> w
+    | <h-l>Fun</h-l> (t, u) -&gt; <h-l>Fun</h-l> (inner name t, inner name u)
+    <h-c>(* ... *)</h-c> <h-k>in</h-k>
+  <h-k>let</h-k> name = fresh_name () </h-k> in
+  <h-l>Mu</h-l> (name, inner name ty)
+
+<h-k>let rec</h-k> unify = <h-k>function</h-k>
+  <h-c>(* ... *)</h-c>
+  | (<h-l>Var</h-l> v, other) | (other, <h-l>Var</h-l> v) -&gt;
+      with_var v
+        (<h-k>if</h-k> occurs_in v other <h-k>then</h-k> make_mu v other
+         <h-k>else</h-k> other)
+  <h-c>(* ... *)</h-c>
+</pre>
+
+      <p>
+        Naturally, for this to work, we need to introduce &mu;-types into the
+        the type language &mdash;
+      </p>
+
+      <pre>
+<h-k>type</h-k> <h-t>ty</h-t> =
+  | <h-l>Var</h-l> <h-k>of</h-k> <h-t>var</h-t>
+  | <h-l>Fun</h-l> <h-k>of</h-k> <h-t>ty</h-t> * <h-t>ty</h-t>
+  | <h-l>Mu</h-l> <h-k>of</h-k> <h-t>name</h-t> * <h-t>ty</h-t>
+  | <h-l>Name</h-l> <h-k>of</h-k> <h-t>name</h-t>
+  <h-c>(* ... *)</h-c>
+</pre>
+
+      <p>
+        &mdash; and update the unifier so it handles them. A fairly
+        straightforward way is to treat them as equirecursive types and just
+        unroll them once when attempting to unify. So to solve
+      </p>
+
+      <pre>'a -&gt; 'b = &mu;a. unit -&gt; a</pre>
+
+      <p>
+        we just unroll the right hand side once and use our normal
+        techniques
+      </p>
+
+      <pre>
+'a -&gt; 'b = unit -&gt; (&mu;a. unit -&gt; a)
+'a = unit
+'b = &mu;a. unit -&gt; a
+</pre>
+
+      <p>
+        We first need a function to unroll types
+      </p>
+
+      <pre>
+<h-k>let rec</h-k> unroll name = <h-k>function</h-k>
+  | <h-l>Name</h-l> m <h-k>when</h-k> m = name -&gt; ty
+  | <h-l>Name</h-l> m -&gt; <h-l>Name</h-l> m
+  <h-c>(* ... *)</h-c>
+</pre>
+
+      <p>
+        Which we can apply &ldquo;as a last resort&rdquo; in our unifier.
+      </p>
+
+      <pre>
+<h-k>let rec</h-k> unify = <h-k>function</h-k>
+  <h-c>(* ... *)</h-c>
+  | (<h-l>Mu</h-l> (n, t), u) | (u, <h-l>Mu</h-l> (n, t)) -&gt; unify (unroll n t, u)
+</pre>
+
+      <p>
+        Except, not quite. This change lets the unifier loop infinitely! An
+        example program which could trigger it might be something like
+      </p>
+
+      <pre>
+<h-k>let</h-k> f () = f <h-k>in</h-k>
+<h-k>let</h-k> g () = g <h-k>in</h-k>
+<h-k>if</h-k> something <h-k>then</h-k> f <h-k>else</h-k> g
+</pre>
+
+      <p>
+        Since this requires that <code>f</code> and <code>g</code> have equal
+        types, we may end up with a constraint
+      </p>
+
+      <pre>&mu;a. unit -&gt; a = &mu;b. unit -&gt; b</pre>
+
+      <p>
+        Which would just unroll both sides indefinitely. Instead, when unifying
+        two recursive types, we don't want to unroll them but just check if they
+        are alpha-equivalent (that is, their only difference is in the name of
+        the parameter).
+      </p>
+
+      <p>
+        A simple way of doing this is to pass a list of names we assume are
+        equal into the unification function, and unify two names if they are
+        either identical or assumed identical. Then, when unifying two recursive
+        types, we assume their parameters are identical and unify their bodies
+        without doing any unrolling.<sup><a href="#note-1">1</a></sup>
+      </p>
+
+      <pre>
+<h-k>let</h-k> unify t u =
+  <h-k>let rec</h-k> inner assumed = <h-k>function</h-k>
+    | (<h-l>Name</h-l> n, <h-k>Name</h-k> m) <h-k>when</h-k> n = m -&gt; return ()
+    | (<h-l>Name</h-l> n, <h-l>Name</h-l> m) -&gt;
+        <h-k>if</h-k> eql assumed n m <h-k>then</h-k> return ()
+        <h-k>else</h-k> fail
+    <h-c>(* ... *)</h-c>
+    | (<h-l>Mu</h-l> (n, t), <h-l>Mu</h-l> (m, u)) -&gt;
+        inner ((n, m) :: assumed) (t, u)
+    <h-c>(* ... *)</h-c> <h-k>in</h-k>
+    inner [] (t, u)
+</pre>
+
+      <p>
+        I haven't delved deeply into Huet's algorithm for higher-order
+        unification, but from what I can skim
+        <a href="https://github.com/jozefg/higher-order-unification/blob/master/explanation.md">
+          from here</a>,
+        this seems like it is similar to how that algorithm unifies lambda
+        terms.
+      </p>
+
+      <p>
+        In general, this unification with &mu;-types seems similar to
+        higher-order unification with &mu;s in place of &lambda;s and the
+        &ldquo;application&rdquo; being unrolling. If this is the case, then
+        that may suggest that unification with &mu;-types is semi-decidable.
+      </p>
+
+      <!-- notes -------------------------------------------------------------->
+
+      <footer>
+        <h2 id="notes">Notes</h2>
+
+        <ol>
+          <li id="note-1">
+            <a href="#ref-1">^</a> This is reminiscent of a
+            proof-by-contradiction. We assume some proposition is true
+            (<code>a</code> and <code>b</code> are equivalent types), and if we
+            end up with a contradiction (something like equating <code>a</code>
+            and <code>b -&gt; b</code>) then our assumption must be wrong.
+          </li>
+        </ol>
+      </footer>
+    </article>
+  </body>
+</html>
