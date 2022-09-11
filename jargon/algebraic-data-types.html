@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>Algebraic data types</title>
+
+    <!-- KaTeX for pretty math -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/katex.min.css" integrity="sha384-ZPe7yZ91iWxYumsBEOn7ieg8q/o+qh/hQpSaPow8T6BwALcXSCS6C6fSRPIAnTQs" crossorigin="anonymous">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/katex.min.js" integrity="sha384-ljao5I1l+8KYFXG7LNEA7DyaFvuvSCmedUf6Y6JI7LJqiu8q5dEivP2nDdFH31V4" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.15.6/dist/contrib/auto-render.min.js" integrity="sha384-+XBljXPPiv+OzfbB3cVmLHf4hdUFHlWNZN5spNQ7rmHTXpd7WvJum6fIACpNNfIR" crossorigin="anonymous"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        renderMathInElement(document.body, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false },
+          ],
+        });
+      });
+    </script>
+
+    <link rel=stylesheet href="style.css">
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>Algebraic data types</h1>
+        
+        <nav>
+          <ol>
+            <li><a href="#sum-types">Sum types</a></li>
+            <li><a href="#product-types">Product types</a></li>
+            <li><a href="#identities">Identities</a></li>
+            <li><a href="#read-more">Read more</a></li>
+          </ol>
+        </nav>
+
+        <p>
+          <span><a href="cat-algebra.html">algebra</a></span>,
+          <span><a href="cat-jargon.html">jargon</a></span>,
+          <span><a href="cat-types.html">types</a></span>
+        </p>
+
+        <p>
+          <a href="index.html">Front page</a><br/>
+          <a href="listing.html">Listing</a>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <main>
+        <p>
+          In the most basic sense, most kinds of types in various programming
+          languages can be constructed by <em>composing</em> several simpler
+          types together. 
+        </p>
+
+        <p>
+          The name <strong>algebraic data types</strong> comes from the
+          realization that some kinds of compositions of types can be used to
+          create algebraic structures. The term itself often refers specifically
+          to sum types (and sometimes also product types).
+        </p>
+
+        <!-- sum types -------------------------------------------------------->
+
+        <section>
+          <h2 id="sum-types">Sum types</h2>
+
+          <p>
+            A sum type, usually written $T+U$ for some types $T$ and $U$, is a
+            type whose values are <em>either</em> of type $T$ or of type $U$.
+            Sum types can also be called disjoint unions, tagged unions, variant
+            types, or occasionally enum types.
+          </p>
+
+          <p>
+            In most languages, sum types are created with type definitions. As
+            an example, the equivalent of the $+$ type constructor looks like
+            the following in Haskell and Rust:
+          </p>
+
+          <pre>
+<h-k>data</h-k> <h-t>Either a b</h-t> = <h-l>Left</h-l> <h-t>a</h-t>
+                | <h-l>Right</h-l> <h-t>b</h-t>
+</pre>
+
+          <pre>
+<h-k>enum</h-k> <h-t>Either</h-t>&lt;<h-t>T</h-t>, <h-t>U</h-t>&gt; {
+    <h-l>Left</h-l>(<h-t>T</h-t>),
+    <h-l>Right</h-l>(<h-t>U</h-t>),
+}
+</pre>
+
+          <p>
+            The type <code>Bool</code> has two values while a type
+            <code>Unit</code> has one value. The type <code>Bool + Unit</code>
+            then has $2+1=3$ values; the number of values in a sum type is the
+            sum of the number of values of its constituent parts.
+          </p>
+
+          <p>
+            In a sense, the <code>Either</code> type is the only sum type you
+            need - all others can be represented as just nested
+            <code>Either</code>, which is why more formal type theory models
+            typically only include the $T+U$ way of forming sum types. In fact,
+            it turns out that sums are <em>associative up to isomorphism</em>,
+            which means that the types $(T + U) + V$ and $T + (U + V)$ can be
+            freely converted between each other without any loss of information.
+            The same goes for commutativity; although $T+U$ and $U+T$ are
+            distinct types, a value of one can easily be turned into a value of
+            the other without losing information.
+          </p>
+
+          <p>
+            Note that a sum type is different from a union type; although a
+            union like <code>Int or Int</code> is the same as just
+            <code>Int</code>, the sum type <code>Int + Int</code> is not.
+            Concretely, the latter contains one more bit of information (whether
+            or not the value is of the &ldquo;left&rdquo; or the
+            &rdquo;right&rdquo; <code>Int</code>.
+          </p>
+        </section>
+
+        <!-- product types ---------------------------------------------------->
+
+        <section>
+          <h2 id="product-types">Product types</h2>
+
+          <p>
+            A product type, usually written $T\cdot U$, $T*U$, or $T\times U$,
+            is a type whose values contain <em>both</em> a value of type $T$ and
+            a value of type $U$. Product types can also be called records,
+            structs, or codata types. 
+          </p>
+
+          <p>
+            Like sum types, product types can all be represented with the type
+            constructor $\times$, since product types are also associative and
+            commutative up to isomorphism.
+          </p>
+
+          <pre>
+<h-k>data</h-k> <h-t>Both a b</h-t> = <h-l>Both</h-l> <h-t>a b</h-t>
+</pre>
+
+          <pre>
+<h-k>enum</h-k> <h-t>Both</h-t>&lt;<h-t>T</h-t>, <h-t>U</h-t>&gt; {
+    <h-l>Both</h-l>(<h-t>T</h-t>, <h-t>U</h-t>),
+}
+
+<h-c>// or more idiomatically</h-c>
+
+<h-k>struct</h-k> <h-t>Both</h-t>&lt;<h-t>T</h-t>, <h-t>U</h-t>&gt;(<h-t>T</h-t>, <h-t>U</h-t>);
+</pre>
+
+          <p>
+            Product types are similar to cartesian products. The number of
+            elements in a product type like <code>Bool * Int</code> is the
+            number of elements in a <code>Bool</code> times the number of
+            elements in an <code>Int</code>.
+          </p>
+        </section>
+
+        <!-- identities ------------------------------------------------------->
+
+        <section>
+          <h2 id="identities">Identities</h2>
+
+          <p>
+            Certain types are <em>identity types</em> with respect to these type
+            constructor, in the sense that combining any other type with these
+            adds no extra information to the overall type.
+          </p>
+
+          <p>
+            For product types, the identity is the <code>Unit</code> type
+            &ndash; also known as $1$ or <code>Void</code> &ndash; which has one
+            element (often <code>()</code>), and since one is identity element
+            for multiplication, doing $T\times 1$ adds no extra information. In
+            particular, given a value $t:T$, we only have one way of
+            constructing a value $T\times 1$, namely $(t, ())$.
+          </p>
+
+          <p>
+            For sum types, the identity is the <code>Never</code> type &ndash;
+            also known as $0$, <code>Bottom</code> or confusingly,
+            <code>Void</code> &ndash; which has no elements. This means that it
+            is impossible to construct a value which has that type, which
+            further means that the only way to construct a value of type $T+0$
+            given some value $t:T$ is $\mathrm{Left}\;t$.
+          </p>
+
+          <p>
+            The bottom type is similar to $0$ in that a product type $T\times 0$
+            is itself not possible to construct. All of this may seem uncannily
+            close to how natural numbers work: addition and multiplication are
+            associative and commutative operations, adding zero or multiplying
+            by one does nothing, and multiplying by zero gives zero. In fact,
+            sums and products for both the natural numbers and for types with
+            units and bottom types form a so-called
+            <a href="https://en.wikipedia.org/wiki/Semiring">semiring</a>, which
+            is a kind of algebraic structure &ndash; hence the
+            <em>algebraic</em>.
+          </p>
+        </section>
+
+        <!-- read more -------------------------------------------------------->
+
+        <section>
+          <h2 id="read-more">Read more</h2>
+
+          <p>
+            Bartosz Milewski has a
+            <a href="https://bartoszmilewski.com/2015/01/13/simple-algebraic-data-types/">
+              good introduction to ADTs</a>
+            as part of his &ldquo;Categories for Programmers&rdquo; series on
+            category theory.
+          </p>
+        </section>
+      </main>
+    </article>
+  </body>
+</html>
