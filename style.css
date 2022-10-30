@@ -101,6 +101,11 @@ h4 {
   font: normal var(--size-h4) var(--font-small);
 }
 
+h1 code { font-size: var(--size-h1); }
+h2 code { font-size: var(--size-h2); }
+h3 code { font-size: var(--size-h3); }
+h4 code { font-size: var(--size-h4); }
+
 header {
   border-bottom: 1px dotted var(--col-fg2);
 }

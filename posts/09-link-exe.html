@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>link.exe cheatsheet</title>
+
+    <link rel=stylesheet href="../style.css">
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1><code>link.exe</code> cheatsheet</h1>
+        
+        <p>
+          <time>2022 OCT 30</time>
+          <span>
+            <a href="index.html#tools">TOOLS</a>
+          </span>
+        </p>
+      </header>
+
+      <!-- intro -------------------------------------------------------------->
+
+      <p>
+        Let's say you have a COFF or a PE object lying around, which you would
+        like to make into a proper executable on Windows. Perhaps you are a
+        compiler developer, or maybe you are just a masochist. Whatever the
+        reason, <code>link.exe</code> is an archaic and strange tool, and
+        your knowledge of <code>ld</code> will not be much help. Hence this
+        cheatsheet!
+      </p>
+
+      <p>
+        This cheatsheet is meant to be a quick reference for some common
+        usecases I've encountered. For a more detailed guide of the various
+        options, see the Microsoft docs page on
+        <a href="https://learn.microsoft.com/en-us/cpp/build/reference/linker-options?view=msvc-170">
+          Linker options</a>
+        and
+        <a href="https://learn.microsoft.com/en-us/cpp/build/reference/linking?view=msvc-170">
+          MSVC Linker reference</a>
+        for everything else.
+      </p>
+
+      <!-- prerequisites ------------------------------------------------------>
+
+      <section>
+        <h2>Prerequisites</h2>
+
+        <p>
+          <code>link.exe</code> can be obtained with Visual Studio Installer,
+          for instance by installing <em>Desktop development with C++</em>. In
+          order to actually use the tool, it needs to be in your
+          <code>PATH</code>. This can be done by either locating and adding the
+          binaries manually at a path like
+        </p>
+
+        <pre>
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.33.31629\bin\Hostx64\x64
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.33.31629\bin\Hostx86\x86
+</pre>
+
+        <p>
+          Alternatively, <code>vcvars{32,64}.bat</code> will do this
+          automatically. It lives somewhere around
+        </p>
+
+        <pre>
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build
+</pre>
+
+        <details closed>
+          <summary><code>vcvars</code> in Powershell</summary>
+          <p>
+            Since this is a batch file, it must be run in a batch terminal (aka
+            cmd). If you want to use it in Powershell, then you can open it as a
+            subprocess from within a cmd where vcvars has been executed:
+          </p>
+
+          <pre>
+C:\tmp>vcvars64
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.3.6
+** Copyright (c) 2022 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+
+C:\tmp>powershell
+Windows PowerShell
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+PS> link /help
+Microsoft (R) Incremental Linker Version 14.33.31630.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+   For help on Linker, type `link /link' or `link'
+   For help on Library Manager, type `link /lib' or `lib'
+   For help on Dumper, type `link /dump' or `dumpbin'
+   For help on Editor, type `link /edit' or `editbin'
+   For help on CvtCIL, type `link /cvtcil'
+   For help on PushThunkObj Generator, type `link /pushthunkobj'
+</pre>
+        </details>
+
+        <p>
+          If the linker is in your path, then <code>link /help</code> should be
+          a valid command.
+        </p>
+
+        <pre>
+C:\tmp>link /help
+Microsoft (R) Incremental Linker Version 14.33.31630.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+   For help on Linker, type `link /link' or `link'
+   For help on Library Manager, type `link /lib' or `lib'
+   For help on Dumper, type `link /dump' or `dumpbin'
+   For help on Editor, type `link /edit' or `editbin'
+   For help on CvtCIL, type `link /cvtcil'
+   For help on PushThunkObj Generator, type `link /pushthunkobj'
+</pre>
+
+        <p>
+          Finally, note that most things in the linker (with the exception of
+          symbols and such) are case insensitive. So you can type in your
+          lowercase UNIX-y chic despite the help pages screaming options and
+          commands at you.
+        </p>
+      </section>
+
+      <!-- dumping ------------------------------------------------------------>
+
+      <section>
+        <h2>Dumping</h2>
+
+        <p>
+          Although you can use a tool like <code>objdump</code> to inspect the
+          files you generate, <code>link.exe</code> does actually come with a
+          built-in object dumping tool, cleverly called <code>/dump</code>.
+        </p>
+
+        <p>General syntax:</p>
+
+        <pre>
+link /dump [options] [files]
+</pre>
+
+        <table>
+          <tr>
+            <th>Option</th>
+            <th>Description</th>
+          </tr>
+
+          <tr>
+            <td><code>/disasm</code></td>
+            <td>Disassemble the object</td>
+          </tr>
+
+          <tr>
+            <td><code>/headers</code></td>
+            <td>Show header information from the object</td>
+          </tr>
+
+          <tr>
+            <td><code>/relocations</code></td>
+            <td>Display any relocations in the object</td>
+          </tr>
+
+          <tr>
+            <td><code>/symbols</code></td>
+            <td>Show symbols defined within the object</td>
+          </tr>
+        </table>
+      </section>
+
+      <!-- linking ------------------------------------------------------------>
+
+      <section>
+        <h2>Linking</h2>
+
+        <p>
+          Linking works more or less as expected. Note that since Windows
+          syscalls are deliberately unstable, you typically end up needing to
+          link against certain libraries to do things like open files or exit a
+          process. For <code>ExitProcess</code> we can see
+          <a href="https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-exitprocess">
+            on its Microsoft docs page</a>
+          that it lives in <code>Kernel32.lib</code> and
+          <code>Kernel32.dll</code>. To link with it statically, you'd typically
+          include it with your object files:
+        </p>
+
+        <pre>
+link /entry:_WinMain my_exec.lib Kernel32.lib /out:my_exec.exe
+</pre>
+
+        <p>General syntax:</p>
+
+        <pre>
+link [options] [files]
+</pre>
+
+        <table>
+          <tr>
+            <th>Option</th>
+            <th>Description</th>
+          </tr>
+
+          <tr>
+            <td><code>/dll</code></td>
+            <td>Produce a DLL</td>
+          </tr>
+
+          <tr>
+            <td><code>/entry:symbol</code></td>
+            <td>Set the entry point to be <code>symbol</code></td>
+          </tr>
+
+          <tr>
+            <td><code>/machine:arch</code></td>
+            <td>Specify target architecture</td>
+          </tr>
+
+          <tr>
+            <td><code>/out:filename</code></td>
+            <td>Produce the linked executable in <code>filename</code></td>
+          </tr>
+
+          <tr>
+            <td><code>/subsystem:sys</code></td>
+            <td>
+              Select the
+              <a href="https://learn.microsoft.com/en-us/cpp/build/reference/subsystem-specify-subsystem?view=msvc-170">
+                subsystem</a>
+              to link for<sup><a href="#note-1" id="ref-1">1</a></sup>
+            </td>
+        </table>
+      </section>
+
+      <footer>
+        <h2>Notes</h2>
+
+        <ol>
+          <li id="note-1"><a href=#ref-1">^</a>
+            Subsystems are somewhat weird and not very well documented, but the
+            choice basically modifies
+
+            <ol>
+              <li>The default entry point</li>
+              <li>What the program can do</li>
+            </ol>
+
+            <code>/entry</code> is prioritized over the subsystem entry point.
+            With the subsystem <code>console</code>, &ldquo;the operating system
+            provides a console&rdquo; while <code>windows</code> does not.
+            Interestingly, if you use <code>ExitProcess</code> in a
+            <code>windows</code> subsystem, then the exit code will not be saved
+            in <code>%ERRORLEVEL%</code> or <code>$LASTEXITCODE</code>.
+
+            <br>
+
+            All this seems to indicate that <code>console</code> is the default
+            if not specified.
+          </li>
+        </ol>
+      </footer>
+    </article>
+  </body>
+</html>
