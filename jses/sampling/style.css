@@ -1,0 +1,53 @@
+:root {
+    --bg: white;
+    --fg: black;
+    --a1: #a35;
+    --a2: #36b;
+
+    font: 18px sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #1d1d1d;
+        --fg: #e8e7e6;
+    }
+}
+
+body {
+    background-color: var(--bg);
+    color: var(--fg);
+
+    margin: auto;
+    max-width: 80ch;
+    padding: 15px;
+}
+
+canvas {
+    width: 100%;
+}
+
+textarea {
+    appearance: none;
+    background-color: var(--bg);
+    border: 1px solid var(--a1);
+    color: var(--fg);
+
+    letter-spacing: 1px;
+    margin: 5px;
+    padding: 5px;
+    resize: vertical;
+    width: 100%;
+}
+
+textarea:focus {
+    border: 1px solid var(--a2);
+    outline: none;
+}
+
+select {
+    background-color: var(--bg);
+    border: 1px solid var(--a1);
+    color: var(--fg);
+    padding: 5px;
+}

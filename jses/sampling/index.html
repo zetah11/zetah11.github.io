@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="initial-scale=1, width=device-width">
+
+    <title>Distributions</title>
+
+    <link rel="stylesheet" href="style.css">
+    <script type="text/javascript" src="main.js"></script>
+</head>
+
+<body>
+    <textarea id="script" autocomplete="off" autofocus>a*b+c</textarea>
+
+    <canvas id="histogram" width="800" height="350">
+        canvas element not supported; the app won't work correctly without it.
+    </canvas>
+
+    <p id="range">Range 0 to 0</p>
+
+    <h2>Distributions</h2>
+
+    <p>
+        <code>a</code>, <code>b</code>, <code>c</code>, &hellip;, <code>z</code>
+        are independent random variables. Any JavaScript is accepted, with the
+        last expression being the result. The input is sampled several times and
+        graphed in a histogram, giving an approximate probability density of the
+        given expression. The line marks the value 0.
+    </p>
+
+    <label for="preset">Presets</label>
+
+    <select id="preset">
+        <option selected value="a*b+c">Smooth sawtooth</option>
+        <option value="a-b">Triangle</option>
+        <option value="a-b+c-d+e-f+g-h">Almost normal</option>
+        <option value="a">Uniform</option>
+    </select>
+</body>
+
+</html>
