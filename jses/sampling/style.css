@@ -1,16 +1,16 @@
 :root {
     --bg: white;
     --fg: black;
-    --a1: #a35;
-    --a2: #36b;
+    --a1: #d53;
+    --a2: #08c;
 
     font: 18px sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --bg: #1d1d1d;
-        --fg: #e8e7e6;
+        --bg: #0d1117;
+        --fg: #ddd;
     }
 }
 

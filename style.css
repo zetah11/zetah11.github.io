@@ -175,7 +175,7 @@ time { color: var(--col-fg2); }
 
 /* code --------------------------------------------------------------------- */
 
-h-c { color: var(--col-co); }
+h-c { color: var(--col-co); }
 h-k { color: var(--col-kw); }
 h-l { color: var(--col-li); }
 h-t { color: var(--col-ty); }
