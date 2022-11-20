@@ -32,9 +32,9 @@ textarea {
     background-color: var(--bg);
     border: 1px solid var(--a1);
     color: var(--fg);
-
+    font-family: monospace, monospace;
     letter-spacing: 1px;
-    margin: 5px;
+    margin: 5px 0;
     padding: 5px;
     resize: vertical;
     width: 100%;
@@ -48,6 +48,9 @@ textarea:focus {
 select {
     background-color: var(--bg);
     border: 1px solid var(--a1);
+    border-radius: 5px;
     color: var(--fg);
+    font-family: monospace;
+    font-size: inherit;
     padding: 5px;
 }

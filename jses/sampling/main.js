@@ -42,7 +42,10 @@ window.onload = () => {
         const text = prepareScript(input.value);
 
         try {
-            (0, eval)(text);  // abort on syntax errors etc
+            // eval and check for nan to abort on syntax errors etc
+            const v = Number((0, eval)(text));
+            console.log(v);
+            if (Number.isNaN(v) || v === undefined) return;
             userFn = () => {
                 return (0, eval)(text);
             };
