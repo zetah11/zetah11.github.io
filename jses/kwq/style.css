@@ -1,0 +1,81 @@
+:root {
+  color-scheme: light dark;
+  --col-hidden: black;
+  --col-missed: red;
+  --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --col-hidden: white;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  margin: auto;
+  max-width: 80ch;
+  padding: 15px;
+}
+
+h1 {
+  border-bottom: 1px dotted;
+}
+
+input, button {
+  font-size: inherit;
+  margin: 1em 0;
+  padding: 5px;
+  width: 100%;
+}
+
+input[type="checkbox"] {
+  margin: 1em 0;
+  padding: 5px;
+  width: unset;
+}
+
+#choices {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+#choices > * + * {
+  margin-top: 0.2em;
+}
+
+#give-up {
+  flex: 0 0 content;
+}
+
+#input-section {
+  display: flex;
+  gap: 10px;
+}
+
+#kw { font-family: var(--font-mono); }
+
+.answer {
+  display: inline-block;
+  font-family: var(--font-mono);
+  margin: 0.2em 0.2em;
+  padding: 0.2em 0.2em;
+}
+
+.hidden {
+  background-color: var(--col-hidden);
+  color: var(--col-hidden);
+}
+
+.hidden::selection {
+  background-color: rgb(0, 0, 0, 0);
+  color: rgb(0, 0, 0, 0);
+}
+
+.missed {
+  color: var(--col-missed);
+}

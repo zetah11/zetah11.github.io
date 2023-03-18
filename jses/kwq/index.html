@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang=en>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1, width=device-width" />
+    <title>The keyword game</title>
+
+    <script src="data.js"></script>
+    <script src="mui.js"></script>
+    <script src="script.js"></script>
+
+    <link rel="stylesheet" href="style.css" />
+  </head>
+
+  <body>
+    <h1>The keyword game</h1>
+
+    <noscript>
+      <p>This game requires JavaScript to play</p>
+    </noscript>
+
+    <section id=choose-lang>
+      <div id=choices></div>
+
+      <input type=checkbox id=alphabetical />
+      <label for=alphabetical>Alphabetical order</label>
+
+      <details>
+        <summary>What is this?</summary>
+
+        <p>
+          You'll be presented with a list of hidden words, each of which is a
+          keyword in the language you choose. As you type out words, those
+          which appear on the list will be revealed. By default, the words will
+          be placed in a random order. Check &ldquo;Alphabetical order&rdquo;
+          to instead order them.
+        </p>
+
+        <p>
+          For languages where keywords are case insensitive, the game will also
+          be case insensitive.
+        </p>
+
+        <p>
+          What exactly is a keyword? The answer depends on the language and is
+          often quite fuzzy. In some languages, whether a word is classified as
+          a keyword or not can depend on all kinds of context and which
+          specific implementation you're using. For the purposes of this quiz,
+          an &ldquo;include as many as is reasonable&rdquo;-approach is taken:
+          if it looks a bit like an identifier or name, but the language
+          gives it some special meaning or syntax, it's a keyword.
+        </p>
+      </details>
+    </section>
+
+    <section id=results>
+      <h2 id=result></h2>
+      <button id=play-again>Play again</button>
+    </section>
+
+    <section id=play>
+      <div id=input-section>
+        <input id=kw placeholder=keyword />
+        <button id=give-up>Give up</button>
+      </div>
+
+      <div id=answers></div>
+
+      <p>From <cite id=source></cite></p>
+    </section>
+  </body>
+</html>
