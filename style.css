@@ -13,7 +13,7 @@
   --col-li: #d53;
   --col-ty: #099;
 
-  --font-code:  "Source Code Pro", Courier, monospace;
+  --font-code:  "Source Code Pro", "Cascadia Code", ui-monospace, monospace;
   --font-small: Helvetica, Arial, sans-serif;
   --font-text:  "PT Serif", Georgia, serif;
 
@@ -143,6 +143,10 @@ footer li { margin: 0.5em 0; }
 
 p { margin: 10px 0; }
 
+small { font-style: italic; }
+
+strong { font-style: italic; }
+
 sup { line-height: 0; }
 
 .table-data { overflow: auto; }
@@ -186,5 +190,15 @@ pre, code {
   background-color: var(--col-bg2);
   border-radius: 5px;
   font: var(--size-code) var(--font-code);
+}
+
+pre.open-down {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+pre.open-up {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 

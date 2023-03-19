@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name=viewport content="initial-scale=1, width=device-width">
+
+    <title>Z: Concurrency 2</title>
+
+    <link rel=stylesheet href="../style.css">
+  </head>
+
+  <body>
+    <article>
+      <header>
+        <h1>Z: Concurrency 2</h1>
+        
+        <p>
+          <time>2023 MAR 19</time>
+          <span>
+            <a href="index.html#lang">LANG</a>,
+            <a href="index.html#z">Z</a>
+          </span>
+        </p>
+      </header>
+
+      <!-- intro ------------------------------------------------------------->
+
+      <p>
+        Following my <a href="03-concurrency-design.html">previous post on the
+        matter</a>, I've had plenty of time to think about concurrency design
+        in the context of zippy.
+      </p>
+
+      <p>
+        An overarching goal here is <strong>ease-of-use</strong>: it should be
+        easy to make sequential things parallel, and it should be easy to do so
+        safely. Finally, it should also be easy to understand what is going on.
+      </p>
+
+      <!-- toc --------------------------------------------------------------->
+
+      <nav>
+        <details open>
+          <summary>Table of contents</summary>
+          <ol>
+            <li><a href="#1">Effect handlers and multitasking</a></li>
+            <li>
+              <a href="#2">Joins</a>
+              <ol>
+                <li><a href="#2-1">Cancellation</a></li>
+                <li><a href="#2-2">Schedulers</a></li>
+              </ol>
+            </li>
+            <li><a href="#3">Determinism and composability</a></li>
+            <li><a href="#4">Pitfalls</a></li>
+            <li><a href="#notes">Notes</a></li>
+          </ol>
+        </details>
+      </nav>
+
+      <!-- Effect handlers and multitasking ---------------------------------->
+
+      <section>
+        <h2 id=1>Effect handlers and multitasking</h2>
+
+        <p>
+          With zippy, I intend to use one-shot effects pervasively to capture
+          the idea of side effects. And with that comes effect handlers. An
+          effect is a lot like an super-powered exception. A handler is some
+          dynamically scoped piece of code which executes whenever an effect is
+          performed, and it has access to the part of the call stack from that
+          point to (and including) the handler itself in the form of a
+          resumption.
+        </p>
+
+        <p>
+          A resumption is a lot like a function (it's a delimited continuation)
+          and by calling it, you're effectively jumping back to where the
+          effect was performed. The argument to the resumption is the return
+          value of the corresponding effect.
+        </p>
+
+        <p>
+          Finally, resumptions in zippy are all <em>affine</em> functions,
+          meaning they can be resumed once or not at all. Resuming multiple
+          times could make effects a bit more expensive since the entire chunk
+          of the call stack must, somehow, be copied. Also it makes control
+          flow a bit unpredictable and hard to reason about, and doesn't
+          interact well with resources or other affine/linear types.
+        </p>
+
+        <pre>
+<h-k>type</h-k> <h-t>Logs</h-t> <h-k>where</h-k>
+  <h-k>eff</h-k> log(message: <h-t>String</h-t>)
+
+<h-k>let</h-k> reverse_logger = <h-t>Logs</h-t> <h-k>handler</h-k>
+  <h-k>eff</h-k> log message =
+    <h-k>let</h-k> result = <h-k>resume</h-k>()
+    print message
+    result
+
+<h-k>fun</h-k> main() =
+  <h-k>with</h-k> reverse_logger
+  Logs.log <h-l>"first"</h-l>
+  Logs.log <h-l>"second"</h-l>
+
+<h-c>-- Output:</h-c>
+<h-c>-- second</h-c>
+<h-c>-- first</h-c></pre>
+
+        <p>
+          Effects are interesting, because they give you cooperative
+          multi-tasking for free. Note how a performed effect essentially
+          pauses the current computation and yields control to the caller.
+          Since <code>resume</code>, the resumption is just an affine function,
+          it can be stored away in a variable, list, or queue, and called later
+          (leaning on a linearity checker to ensure such values are not used
+          multiple times).
+        </p>
+
+        <p>
+          A simple example of such cooperation is that of an infinite stream.
+          We can define a <code>Yields T</code> effect for functions which
+          yield values of type <code>T</code>:
+        </p>
+
+        <pre>
+<h-k>type</h-k> <h-t>Yields T</h-t> <h-k>where</h-k>
+  <h-k>eff</h-k> yield(value: <h-t>T</h-t>)</pre>
+
+        <p>
+          A stream is then just any function with this effect.
+        </p>
+
+        <pre>
+<h-k>fun</h-k> to_stream |<h-t>T</h-t>| (values: <h-t>List T</h-t>) / <h-t>Yields T</h-t> =
+  <h-k>for</h-k> item <h-k>in</h-k> values <h-k>do</h-k>
+    Yields.yield item</pre>
+
+        <p>
+          Now, whenever such a stream yields, what happens next is entirely in
+          the hands of the handler. A custom stream-based <code>for</code>-loop
+          could be implemented, which itself uses effects to break:
+        </p>
+
+        <pre>
+<h-k>type</h-k> <h-t>Breaks T</h-t> <h-k>where</h-k>
+  eff break(value: <h-t>T</h-t>) : <h-t>Nothing</h-t>
+
+<h-k>fun</h-k> (<h-k>for</h-k>*) |<h-t>T</h-t>, <h-t>U</h-t>, <h-t>Ret</h-t>, <h-t>E</h-t>|
+  (iterand   : <h-t>Unit</h-t> -&gt; <h-t>U</h-t>    / <h-t>E</h-t> &amp; <h-t>Yields T</h-t>)
+  (body      : <h-t>T</h-t>    -&gt; <h-t>Unit</h-t> / <h-t>E</h-t> &amp; <h-t>Breaks Ret</h-t>)
+  <h-c>-- The else clause, run if the loop doesn't break</h-c>
+  (otherwise : <h-t>U</h-t>    -&gt; <h-t>Ret</h-t>  / <h-t>E</h-t>)
+<h-k>return</h-k> <h-t>Ret</h-t> <h-k>do</h-k> <h-t>E</h-t> =
+  <h-k>with</h-k> <h-t>Breaks Ret</h-t> <h-k>handler</h-k>
+    <h-k>eff</h-k> break value = value
+    <h-k>return</h-k> value = otherwise value
+
+  <h-k>with</h-k> <h-t>Yields T</h-t> <h-k>handler</h-k>
+    <h-k>eff</h-k> yield value = body value
+
+  it()</pre>
+
+        <p>
+          This makes it easy to run code concurrently with a stream. Also note
+          that anyone using <code>for*</code> is allowed to <code>break</code>
+          whenever they want, and that by doing this, the stream itself should
+          be cancelled.
+        </p>
+
+        <pre>
+<h-k>fun</h-k> main() =
+  <h-k>for</h-k>* value: Int <h-k>in</h-k> to_stream [<h-l>1</h-l>, <h-l>2</h-l>, -<h-l>3</h-l>, <h-l>4</h-l>] <h-k>do</h-k>
+    print value
+    <h-k>if</h-k> value < <h-l>0</h-l> <h-k>do</h-k>
+      break()</pre>
+
+        <p>
+          Since any handler is allowed to not resume, cancellation is by
+          necessity supported everywhere in the language.
+        </p>
+      </section>
+
+      <!-- Joins ------------------------------------------------------------->
+
+      <section>
+        <h2 id=2>Joins</h2>
+
+        <p>
+          Although effects make it easy to do multi-tasking in a cooperative
+          way, it doesn't really take advantage of parallelism.
+        </p>
+
+        <p>
+          First, note that running
+          pure<sup><a id=ref-1 href="#note-1">1</a></sup> code in parallel is
+          easy. There's no access to the outside world except through the
+          function arguments and return value, so there's no danger of data
+          races, deadlocks, or other issues.
+        </p>
+
+        <p>
+          A bigger challenge arises if, say, the main thread spawns a child
+          thread, and that child thread has an effect which escapes. The
+          intuitive way this would work is that this effect gets handled by the
+          appropriate handler in the main thread (after all, that is where the
+          child thread &ldquo;comes from&rdquo;), but just running such a
+          handler in a child thread is an easy way to get data races and for
+          handlers to become corrupted if their stack frame is returned from.
+        </p>
+
+        <p>
+          The basic solution I have in mind is, at its core, about limiting
+          parallelism to only be allowed with pure code. This (rather strict)
+          regime ensures data race safety, but is on its own pretty harsh.
+          Like many other languages, there would be some kind of
+          <code>Thread</code> library (probably part of the stdlib) with a
+          function <code>spawn</code> that takes a function and returns a join.
+          A join is itself a function you can call, at which point, the calling
+          thread will block until the spawned thread finishes. The join returns
+          whatever it is the spawned function returns.
+        </p>
+
+        <pre>
+<h-k>import</h-k> Standard.Thread
+<h-k>import</h-k> Standard.Time.second
+
+<h-k>fun</h-k> main() =
+  <h-k>let</h-k> join = Thread.spawn () =>
+    Thread.sleep (<h-l>2</h-l>.second)
+    <h-l>5</h-l>
+
+  print <h-l>"working hard..."</h-l>
+  let value: Int = join()
+  print <h-l>"done!"</h-l>
+  print value
+
+<h-c>-- Output:</h-c>
+<h-c>-- working hard... <em>(2 second delay)</em></h-c>
+<h-c>-- done!</h-c>
+<h-c>-- 5</h-c></pre>
+
+        <details open>
+          <summary>Effect safety of sleeping</summary>
+          <p>
+            Sleeping a thread is probably an effectful operation (after all, it
+            probably does have to figure out the current time or do a syscall
+            or something to actually do it). But it doesn't really
+            <em>need</em> to be; a pure function will never return a different
+            result whether a sleep happens or not. For that to actually be an
+            observable thing<sup><a id="ref-2" href="#note-2">2</a></sup>, the
+            code would need to invoke some other effect (<code>Times</code>) to
+            actually measure the time.
+          </p>
+
+          <p>
+            Anyway, I think a nice compromise (to ensure sleeps don't just get
+            disappeared by the partial evaluator) is to keep sleeps effectful,
+            but to have their effect be <code>Threads</code>. Then, the thread
+            spawning function can take a function and handle its
+            <code>Threads</code> effect.
+          </p>
+        </details>
+
+        <p>
+          It can be quite useful to allow effects to escape a thread (imagine
+          if you weren't allowed to log from inside a thread!) so to regain
+          this, the join function is augmented: instead of returning the result
+          of the thread, it returns <em>either</em> the result or another join.
+        </p>
+
+        <pre>
+<h-k>type</h-k> <h-t>Join Res Eff</h-t> = <h-t>Unit</h-t> -> <h-t>JoinResult Res</h-t> (<h-t>Join Res Eff</h-t>) / <h-t>Eff</h-t>
+
+<h-k>type</h-k> <h-t>JoinResult Res Join</h-t> <h-k>where</h-k>
+  <h-k>val</h-k> done(result: <h-t>Res</h-t>)
+  <h-k>val</h-k> paused(join: <h-t>Join</h-t>)</pre>
+
+        <p>
+          The idea here is that whenever an effect which <em>isn't</em> handled
+          by the thread itself is performed, that thread is paused and the
+          effect is saved. Then, whenever the appropriate join is called, that
+          effect &ldquo;re-thrown&rdquo; in the calling thread. Assuming the
+          effect handler does resume, the join then saves whatever it resumed
+          with and returns another join. That join, in turn, represents the
+          continuation of the thread. When a thread finishes, instead of
+          returning another join, it just returns the result as normal.
+        </p>
+
+        <p>
+          This is the critical part of the design. Basically, what's happening
+          is that a thread is free to run pure code in parallel. But the moment
+          an effect escapes the thread, it must pause itself. It's then up to
+          whatever thread has its join to actually handle the effect. And when
+          the effect is handled, the thread can continue doing the same.
+        </p>
+
+        <p>
+          Imagine some function which logs something once if its argument is
+          even and twice if its argument is odd before returning some result:
+        </p>
+
+        <pre>
+<h-k>fun</h-k> compute(x: <h-t>Nat</h-t>) : <h-t>Nat</h-t> =
+  Logs.log <h-l>"computing the result"</h-l>
+  <h-k>if</h-k> is_odd x <h-k>do</h-k>
+    Logs.log <h-l>"(for an odd argument)"</h-l>
+  x / <h-l>2</h-l></pre>
+
+        <p>
+          This can be spawned in a thread, which will immediately execute the
+          function. However, as soon as it hits the effectful bit, it pauses
+          execution and waits for the join.
+        </p>
+
+        <pre class="open-down">
+<h-k>import</h-k> Standard.Thread
+
+<h-k>fun</h-k> main() =
+  <h-k>with</h-k> <h-t>Logs</h-t> <h-k>handler</h-k>
+    <h-k>let</h-k> log = print
+
+  <h-k>let</h-k> join = Thread.spawn () =&gt; compute <h-l>5</h-l>
+  <h-c>-- Nothing has been printed yet!</h-c></pre>
+
+        <p>
+          At this point, <code>main</code> might be in the middle of some
+          complicated computation itself. Nothing has happened, however:
+          although the thread may have performed the effect, that effect is
+          just patiently waiting for the main thread to call the join.
+        </p>
+
+        <p>Only when it does call the join will the effect be performed:</p>
+
+        <pre class="open-up open-down">
+  <h-k>var</h-k> result = join()
+  <h-c>-- Now the logger has been invoked</h-c></pre>
+
+        <p>
+          In this case, since the function prints, the result contains a join.
+          We can help the thread make progress by calling the joins in a loop
+          until it returns:
+        </p>
+
+        <pre class="open-up">
+  <h-k>let</h-k> result = <h-k>loop</h-k>
+    result := <h-k>case</h-k> result
+      <h-k>is</h-k> JoinResult.finished (<h-k>let</h-k> value) => break final_result
+      <h-k>is</h-k> JoinResult.paused   (<h-k>let</h-k> join)  => join()
+
+  print(<h-l>"Final result: "</h-l>, result)</pre>
+
+        <p>
+          This looks a lot like polling an asynchronous or cooperatively
+          multitasked function, and that's because it is. This system
+          completely abstracts away the concept of threads: indeed, they aren't
+          actually required here. All that needs to happen is that the join
+          returns whenever an effect happens or a value is returned. It's
+          perfectly fine for the spawned thread to run synchronously during the
+          call join. However, because the chunk of code that the join must wait
+          for is pure, it is <em>also</em> completely okay for it to run that
+          in parallel.
+        </p>
+
+        <p>
+          This actually makes it really easy to reason about multi-tasking code
+          since it looks and behaves as if your code was synchronous.
+        </p>
+
+        <h3 id=2-1>Cancellation</h3>
+
+        <p>
+          What happens if you just never call the join? The thread, at that
+          point, is unable to make any progress. It could just sit around
+          forever, waiting for something that will never come, but a more
+          reasonable approach is to cancel it whenever the join is dropped.
+        </p>
+
+        <p>
+          Since effects already support cancellation, this is completely okay.
+          Further, this cancellation can only happen at effect boundaries. If
+          a thread is waiting for an effect, but the join is dropped, then from
+          the perspective of that thread, it's no different from if the
+          resumption had been dropped in the handler &ndash; it has no way to
+          tell the difference, so you don't need to worry about two kinds of
+          cancellation.
+        </p>
+        
+        <h3 id=2-2>Schedulers</h3>
+
+        <p>
+          Since a thread now needs to be polled to stay alive, there's some
+          potential for fun here. It would probably get pretty annoying to
+          write the join-until-done loop, so a library of schedulers could
+          appear.
+        </p>
+
+        <p>
+          A scheduler would be used a bit like this: 
+        </p>
+
+        <pre>
+<h-k>let</h-k> result1, result2, result3 = Thread.round_robin(task1, task2, task3)</pre>
+
+        <p>
+          And it would be responsible for spawning each task and polling them
+          in a loop. A round robin scheduler could do the polling in a
+          round-robin fashion (surprising, I know). A biased scheduler might
+          poll the first task more often.
+        </p>
+
+        <p>
+          Since the choice of scheduler influences the order in which joins are
+          called, they also influence the order in which effects happen. But
+          importantly, since a scheduler is just normal code, they will always
+          do it in the same order.<sup><a id=ref-3 href="#note-3">3</a></sup>
+        </p>
+      </section>
+
+      <!-- Determinism and composability ------------------------------------->
+
+      <section>
+        <h2 id=3>Determinism and composability</h2>
+
+        <p>
+          This leads to a very important point: this multi-tasking system is
+          completely deterministic! Since different threads can only interact
+          using effects, and effects are explicitly order using joins and
+          schedulers, the program itself will be completely deterministic.
+        </p>
+
+        <p>
+          This is <em>really, really nice</em> actually, because it makes
+          debugging much easier. Non-interacting parts of your program might
+          run in parallel (or sequentially, or interleaved &ndash; it doesn't
+          matter), but the parts of your program where output happens will
+          always have a predictable order.
+        </p>
+
+        <p>
+          It's worth mentioning that this system also gives you a kind of
+          structured concurrency: if you want a thread to run to completion,
+          you <em>have</em> to poll it. This places a bound on the lifetime of
+          a thread. It's only alive as long as the join is alive. 
+        </p>
+
+        <p>
+          But unlike many other systems for structured concurrency, this also
+          gives you quite a bit of freedom. The lifetime of a thread is no
+          longer limited to a fixed, lexical scope, but to the lifetime of a
+          variable. And that variable can be passed to other functions,
+          returned as a function, used inside other effects, moved into a
+          thread of its own, and so on &ndash; the possibilities are endless!
+          And the moment you're done with the thread and want it gone, you can
+          just forget about the variable and it will clean up after itself, or
+          you can give it to some scheduler and run it to completion.
+        </p>
+
+        <hr />
+
+        <p>
+          During the design of zippy, I've also been quite focused on ensuring
+          <strong>composability</strong>: basically, being able to take two
+          independent programs/functions/expressions that, on their own, work,
+          and easily combining them so the resulting thing also works.
+        </p>
+
+        <p>
+          Being able to handle arbitrary effects is important here: if you for
+          whatever reason require purity or determinism, you can make anything
+          pure and deterministic by handlings all its effects. 
+        </p>
+
+        <p>
+          By forcing all of the actually parallel parts to be pure, this
+          applies even in the context of multitasking. Although a function or
+          library might use a non-deterministic scheduler, perhaps to achieve
+          better performance, you can regain purity by handling the source of
+          the effect.
+        </p>
+
+        <p>
+          Essentially, I think it is important to have a strong set of
+          requirements &ndash; purity &ndash; which anyone can rely on if they
+          need, with the ability to &ldquo;undo&rdquo; anything which prevents
+          that requirement from being met.
+        </p>
+      </section>
+
+      <!-- Pitfalls ---------------------------------------------------------->
+
+      <section>
+        <h2 id=4>Pitfalls</h2>
+
+        <p>
+          An issue I haven't touched on is what exactly happens if we never
+          join. Naturally, if the join is dropped, the thread should be
+          cancelled. This might be problematic in the presence of linear types
+          however. An effect looks basically just like a function, so it really
+          should be allowed to take a linear type as argument. And in
+          single-threaded code, if an effect is performed with such a type as
+          its argument, it is guaranteed to be used.
+        </p>
+
+        <p>
+          But the threading system allows (and probably even encourages)
+          &ldquo;forgetting&rdquo; effects by ignoring the join and cancelling
+          the thread. This is subtly different from single-threaded
+          cancellation. There, cancellation can only happen <em>inside</em> an
+          effect handler, at which point the linear value is in our hands and
+          we must do something with it. With a join, the cancellation can
+          happen <em>before</em> a handler, effectively keeping the linear
+          value in a limbo of disuse.
+        </p>
+
+        <p>
+          It might be possible to make a join linear by looking at its effects;
+          since the join somehow has to hold the effects it is parameterized by
+          it is reasonable for the linearity of the join to be dependent on
+          that. That way, if a thread performs effects which take linear
+          arguments, anyone holding such a join is forced to use it. I'm not
+          sure this is the best way to go about things, though.
+        </p>
+
+        <p>
+          It's also worth mentioning that this isn't a problem for affine
+          types, since they, by definition, are allowed to be unused. So a join
+          would only need to be linear if there were other linear types in the
+          mix.
+        </p>
+
+        <p>
+          Also, this pseudo-cooperative tasking system is, in my opinion, quite
+          nice to work with, it does come with overhead. Namely, there's
+          synchronization involved <em>every time</em> an escaping effect is
+          performed. That's pretty bad if you have some effect heavy workload
+          you wish to run on another thread, even if it is
+          <strong>great</strong> for determinism.
+        </p>
+
+        <p>
+          I think an actor-like system (such as the one described in
+          <cite>Z: Concurrency</cite>) would be a worthy inclusion. A basic
+          idea is that each actor has its own entry point and can only access
+          the default handlers (leaving the issue of thread safety as a problem
+          for the outside world).
+        </p>
+
+        <p>
+          Finally, there is the question of &ldquo;what if I mutate an
+          argument?&rdquo; This doesn't really induce an effect, but it does
+          change the type of the function. I haven't fully worked out the
+          value semantics yet, but I imagine that if you <em>somehow</em> got a
+          hold of a mutable reference, then mutating it would use the same
+          mechanism to ensure a deterministic order of mutation and protect
+          against data races. I might end up just enforcing copying on captured
+          variables, in which case this is not an issue.
+        </p>
+      </section>
+
+      <!-- Notes ------------------------------------------------------------->
+
+      <footer>
+        <h2 id="notes">Notes</h2>
+
+        <ol>
+          <li id="note-1">
+            <a href="#ref-1">^</a> &ldquo;Purity&rdquo; in zippy refers very
+            specifically to something with no effects, because effects are the
+            only way of interacting with the outside world. FFI is limited to
+            only being allowed inside default handlers (which are only reached
+            if an effect escapes <code>main</code>) and mutation (either of
+            an environment, such as a mutating method, or of the argument) is
+            sort of considered an effect.
+
+            <br />
+
+            Since all effects are handleable, any piece of code can be made
+            pure by just handling all its effects.
+          </li>
+
+          <li id="note-2">
+            <a href="#ref-1">^</a> By observable, I mean something that pure
+            code can observe about itself. Time is not observable since you
+            need to interact with the outside world to get ahold of some clock
+            value.
+
+            <br />
+
+            (By the way, this is why it's okay to optimize programs: even if
+            they run faster, that doesn't change their behaviour in any way, so
+            it's okay to do as much. It's like the as-if principle, just
+            better, because there's an actual system to enforce it.)
+          </li>
+
+          <li id="note-3">
+            <a href="#ref-1">^</a> This does hint at the notion of a
+            non-deterministic scheduler which uses randomness to choose which
+            task to schedule, which might be useful. This doesn't change the
+            point, though, since you can always just handle whatever
+            non-deterministic effect is used to regain determinism.
+          </li>
+        </ol>
+      </footer>
+    </article>
+  </body>
+</html>
